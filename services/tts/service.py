@@ -76,8 +76,9 @@ class TTSService:
             text: str,
             voice_id: Optional[str] = None,
             ref_audio: Optional[str] = None,
-            ref_text: Optional[str] = None
-    ) -> str:
+            ref_text: Optional[str] = None,
+            upload_to_s3: bool = True
+    ) -> dict:
         """
         Convert text to speech and save to file.
         
@@ -86,9 +87,15 @@ class TTSService:
             voice_id: Optional ID of preset voice to use (e.g., 'Binh', 'Doan')
             ref_audio: Optional path to reference audio for voice cloning
             ref_text: Optional text spoken in reference audio
+            upload_to_s3: Whether to upload to S3 storage (default: True)
             
         Returns:
-            Path to generated audio file
+            Dict containing:
+                - local_path: Path to local file (if not uploaded to S3)
+                - s3_key: S3 object key (if uploaded)
+                - s3_url: Public S3 URL (if uploaded)
+                - presigned_url: Presigned URL with expiration (if uploaded)
+                - filename: Generated filename
             
         Raises:
             RuntimeError: If synthesis fails
@@ -135,8 +142,40 @@ class TTSService:
             logger.info(f"Saving audio to: {output_path}")
             self._tts_model.save(audio, str(output_path))
 
+            result = {
+                'filename': filename,
+                'local_path': str(output_path)
+            }
+
+            # Upload to S3 if requested
+            if upload_to_s3:
+                from .storage import tts_storage
+                
+                metadata = {
+                    'text_length': len(text),
+                    'voice_id': voice_id or settings.default_tts_voice,
+                    'generated_at': filename.split('_')[1] + '_' + filename.split('_')[2].split('.')[0]
+                }
+                
+                s3_key = tts_storage.upload_file(
+                    file_path=str(output_path),
+                    object_name=filename,
+                    metadata=metadata,
+                    delete_local=True
+                )
+                
+                if s3_key:
+                    result['s3_key'] = s3_key
+                    result['s3_url'] = tts_storage.get_public_url(s3_key)
+                    result['presigned_url'] = tts_storage.generate_presigned_url(s3_key, expiration=86400)  # 24 hours
+                    logger.info(f"Audio uploaded to S3: {s3_key}")
+                    # Remove local_path from result since file was deleted
+                    result.pop('local_path', None)
+                else:
+                    logger.warning("S3 upload failed, keeping local file")
+
             logger.info(f"Audio generated successfully: {filename}")
-            return str(output_path)
+            return result
 
         except Exception as e:
             logger.error(f"TTS synthesis failed: {str(e)}")

@@ -1,0 +1,99 @@
+# ============================================================
+# FILER.TOML - Cấu hình Filer cho SeaweedFS
+# ============================================================
+# Filer là service cung cấp filesystem interface và quản lý metadata
+# của các file. File này cấu hình cách Filer lưu trữ metadata và
+# các tùy chọn cho file operations.
+
+# ============================================================
+# METADATA STORE - Nơi lưu thông tin về files
+# ============================================================
+# Filer cần một database để lưu metadata (tên file, đường dẫn, kích thước, v.v.)
+# LevelDB2 là lựa chọn tốt cho production - nhanh, ổn định, không cần setup riêng
+
+[leveldb2]
+enabled = true
+dir = "/data/filerldb2"  # Thư mục lưu metadata trong container
+
+# Các option khác (comment vì không dùng):
+# [mysql] - Nếu muốn dùng MySQL làm metadata store
+# [postgres] - Nếu muốn dùng PostgreSQL
+# [redis] - Nếu muốn dùng Redis (tốc độ cao nhưng cần nhiều RAM)
+
+# ============================================================
+# FILER OPTIONS - Cấu hình chung
+# ============================================================
+[filer.options]
+# Tự động xóa file/folder đệ quy
+recursive_delete = true
+
+# Kích thước tối đa cho mỗi chunk (MB)
+# File lớn sẽ được chia thành nhiều chunk
+max_mb = 32
+
+# Số lượng file tối đa mỗi thư mục (để tối ưu performance)
+# Nếu vượt quá, nên tạo sub-folders
+dir_list_limit = 100000
+
+# File nhỏ hơn giá trị này sẽ được lưu trực tiếp vào Filer metadata
+# File lớn hơn sẽ được lưu vào Volume servers
+# Với file .wav thường lớn, để 0 để tất cả lưu vào Volume
+save_to_filer_limit = 0
+
+# Cho phép metadata operations bất đồng bộ để tăng performance
+async_metadata_ops = true
+
+# ============================================================
+# COMPRESSION - Cấu hình nén file
+# ============================================================
+[filer.options.compression]
+# Với file .wav (audio files), KHÔNG NÊN nén vì:
+# 1. File .wav đã được nén ở định dạng audio
+# 2. Nén thêm tốn CPU mà không giảm được nhiều dung lượng
+# 3. Làm chậm upload/download
+compress_data = false
+
+# Nếu bạn lưu trữ cả file text/json, có thể bật compression:
+# compress_data = true
+# mime_types = ["text/plain", "application/json", "text/html"]
+
+# ============================================================
+# CORS - Cho phép truy cập từ web browsers
+# ============================================================
+[filer.options.cors]
+enabled = true
+allowed_origins = ["*"]  # Production nên đổi thành domain cụ thể: ["https://yourdomain.com"]
+allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"]
+allowed_headers = ["*"]
+exposed_headers = ["Content-Length", "Content-Range", "Content-Type", "ETag"]
+allow_credentials = false
+max_age = 3600
+
+# ============================================================
+# TTL - Time To Live (Tự động xóa file cũ) - OPTIONAL
+# ============================================================
+# Uncomment nếu muốn tự động xóa file sau một thời gian
+# Hữu ích cho temporary recordings hoặc cache
+
+# [filer.options.ttl]
+# default_ttl = "30d"  # Xóa file sau 30 ngày
+# Các đơn vị: m (minutes), h (hours), d (days), w (weeks), M (months), y (years)
+
+# ============================================================
+# CIPHER - Mã hóa data - OPTIONAL
+# ============================================================
+# Uncomment để mã hóa data khi lưu trữ (encryption at rest)
+# CHÚ Ý: Nếu mất cipher key, sẽ MẤT TẤT CẢ DATA!
+
+# [filer.options.cipher]
+# enabled = true
+# # Tạo key bằng: echo "your-secret-key-here" | base64
+# cipher_key = "your-base64-encoded-key-here"
+
+# ============================================================
+# NOTES
+# ============================================================
+# - File config này được mount vào container tại: /etc/seaweedfs/filer.toml
+# - Sau khi sửa file, cần restart filer: docker-compose restart filer
+# - Không thay đổi [leveldb2] dir sau khi đã có data (sẽ mất metadata)
+# - Backup thư mục filer-data volume thường xuyên

@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=".env.production",
         env_file_encoding="utf-8",
         case_sensitive=False
     )
@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     tts_model_repo: str = "pnnbao-ump/VieNeu-TTS-0.3B-q8-gguf"
     tts_output_dir: str = "outputs/tts"
     default_tts_voice: str = "Doan"  # Options: Binh, Tuyen, Vinh, Doan, Ly, Ngoc
+    
+    # S3 Storage Configuration (MinIO hoặc S3-compatible; endpoint 8333 = MinIO trong docker)
+    s3_endpoint_url: str = "http://localhost:8333"
+    s3_access_key: str  # MINIO_ROOT_USER
+    s3_secret_key: str  # MINIO_ROOT_PASSWORD
+    s3_bucket_name: str = "audio-files"
+    s3_audio_prefix: str = "tts"  # Prefix for TTS files in bucket
     
     # Recommendation Configuration (Placeholder)
     recommendation_model_path: str = ""

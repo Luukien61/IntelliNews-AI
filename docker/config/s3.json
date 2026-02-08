@@ -1,0 +1,47 @@
+{
+  "identities": [
+    {
+      "name": "admin",
+      "credentials": [
+        {
+          "accessKey": "IrObZ9nZbaKD89Dc8vku",
+          "secretKey": "h8hVqXucmVje8p6QfF6TCF065LWoffHNIQsLON"
+        }
+      ],
+      "actions": [
+        "Admin",
+        "Read",
+        "List",
+        "Tagging",
+        "Write"
+      ]
+    },
+    {
+      "name": "audio_uploader",
+      "credentials": [
+        {
+          "accessKey": "rLhhotZ21KVfBhwGrtr",
+          "secretKey": "TbU8s5NdMHomxWkUG8hM2Rz5pR4vZof0ZAJX"
+        }
+      ],
+      "actions": [
+        "Read",
+        "Write",
+        "List"
+      ]
+    },
+    {
+      "name": "readonly_user",
+      "credentials": [
+        {
+          "accessKey": "0PcOEZfDZhYgK85ZEJQ",
+          "secretKey": "jsEwqgLFio6SiMLq7DwYyyYQ8WPWlqm407j99Kct"
+        }
+      ],
+      "actions": [
+        "Read",
+        "List"
+      ]
+    }
+  ]
+}
