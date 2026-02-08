@@ -34,7 +34,7 @@ class TTSService:
             logger.info(f"Loading VieNeu TTS model: {settings.tts_model_repo}")
             from vieneu import Vieneu
 
-            # Initialize with specified GGUF model
+            # Initialize with HuggingFace repo ID (uses cached model if available)
             self._tts_model = Vieneu(backbone_repo=settings.tts_model_repo)
             logger.info("VieNeu TTS model loaded successfully")
 

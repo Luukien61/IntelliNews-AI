@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import List, Optional
 
 
 class TTSRequest(BaseModel):
@@ -52,3 +52,57 @@ class TTSResponse(BaseModel):
                 "message": "Audio generated successfully"
             }
         }
+
+
+class AudioInfo(BaseModel):
+    """Information about a generated audio file."""
+    
+    voice_id: str = Field(..., description="ID of the voice used (e.g., 'Doan', 'Ly')")
+    description: str = Field(..., description="Human-readable voice description (e.g., 'Giọng nam miền Bắc')")
+    url: Optional[str] = Field(None, description="Public URL to the audio file in MinIO")
+    s3_key: Optional[str] = Field(None, description="S3 object key in MinIO bucket")
+    presigned_url: Optional[str] = Field(None, description="Presigned URL with temporary access")
+    filename: Optional[str] = Field(None, description="Original filename of the audio file")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "voice_id": "Doan",
+                "description": "Giọng nam miền Bắc",
+                "url": "http://localhost:8333/audio-files/tts/abc123.wav",
+                "s3_key": "tts/abc123.wav",
+                "presigned_url": "http://localhost:8333/audio-files/tts/abc123.wav?...",
+                "filename": "tts_20260207_224000_abc123.wav"
+            }
+        }
+
+
+class NewsTTSResponse(BaseModel):
+    """Response model for news article TTS generation."""
+    
+    news_id: int = Field(..., description="ID of the news article")
+    audio_files: List[AudioInfo] = Field(..., description="List of generated audio files for different voices")
+    cached: bool = Field(default=False, description="Whether the result was retrieved from cache")
+    message: str = Field(default="", description="Additional information or status message")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "news_id": 123,
+                "audio_files": [
+                    {
+                        "voice_id": "Doan",
+                        "description": "Giọng nam miền Bắc",
+                        "url": "http://localhost:8333/audio-files/tts/news_123_doan.wav"
+                    },
+                    {
+                        "voice_id": "Ly",
+                        "description": "Giọng nữ miền Nam",
+                        "url": "http://localhost:8333/audio-files/tts/news_123_ly.wav"
+                    }
+                ],
+                "cached": False,
+                "message": "Audio generated successfully"
+            }
+        }
+

@@ -16,7 +16,26 @@ services:
     restart: unless-stopped
     networks:
       - intellinews
-    # MinIO image không có curl/mc → bỏ healthcheck; từ host: curl -I http://localhost:8333/minio/health/live
+  ai-db:
+    image: postgres:16
+    container_name: ai-postgres
+    environment:
+      POSTGRES_DB: intellinews_ai
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-your_secure_password}
+    ports:
+      - "5436:5432"
+    volumes:
+      - intellinews-ai-service-db-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro  # docker-entrypoint-initdb.d/ : auto init database dir, each file will be run in alphabetical order by file name and will only be run once when the volume is newly created (with no existing data).
+    networks:
+      - intellinews
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d intellinews_auth" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
 networks:
   intellinews:
@@ -25,3 +44,5 @@ networks:
 volumes:
   minio-data:
     driver: local
+  intellinews-ai-service-db-data:
+    external: true

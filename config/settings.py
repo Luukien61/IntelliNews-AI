@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     s3_bucket_name: str = "audio-files"
     s3_audio_prefix: str = "tts"  # Prefix for TTS files in bucket
     
+    # Database Configuration (PostgreSQL for AI results)
+    database_url: str = "postgresql://ai_user:ai_password@localhost:5436/intellinews_ai"
+    
+    # News Service Configuration (for fetching news content)
+    news_service_url: str = "http://localhost:8081"
+    news_service_timeout: int = 30  # seconds
+    
     # Recommendation Configuration (Placeholder)
     recommendation_model_path: str = ""
     
