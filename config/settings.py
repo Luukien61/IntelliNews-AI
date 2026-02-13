@@ -43,8 +43,9 @@ class Settings(BaseSettings):
     # Recommendation Configuration (Placeholder)
     recommendation_model_path: str = ""
     
-    # Summarization Configuration (Placeholder)
-    summarization_model_path: str = ""
+    # Summarization Configuration
+    phobert_model_name: str = "vinai/phobert-base"
+    vit5_model_name: str = "VietAI/vit5-base-vietnews-summarization"
     
     @property
     def tts_output_path(self) -> Path:

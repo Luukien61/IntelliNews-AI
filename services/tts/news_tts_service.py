@@ -8,9 +8,9 @@ from config import settings
 from db.models import NewsAIResult
 from services.news_client import news_client
 from services.tts.service import tts_service
+from services.constants import FIELD_CONTENT_PLAIN_TEXT
 
 logger = logging.getLogger(__name__)
-
 
 # Available TTS voices with descriptions
 AVAILABLE_VOICES = [
@@ -29,7 +29,7 @@ class NewsTTSService:
     - Generate audio for multiple voices
     - Upload to MinIO and save to database
     """
-    
+
     def __init__(self, voices: Optional[List[dict]] = None):
         """
         Initialize NewsTTSService.
@@ -38,11 +38,11 @@ class NewsTTSService:
             voices: List of voice configurations. Defaults to AVAILABLE_VOICES.
         """
         self.voices = voices or AVAILABLE_VOICES
-    
+
     async def get_or_generate_audio(
-        self,
-        news_id: int,
-        db: Session
+            self,
+            news_id: int,
+            db: Session
     ) -> tuple[List[dict], bool]:
         """
         Get existing audio or generate new TTS audio for a news article.
@@ -63,26 +63,26 @@ class NewsTTSService:
         if existing and existing.audio_files:
             logger.info(f"Found cached audio for news_id={news_id}")
             return existing.audio_files, True
-        
+
         # 2. Fetch content from news-service
         logger.info(f"Fetching content for news_id={news_id}")
         try:
             content_data = await news_client.get_news_content(
                 news_id=news_id,
-                fields=["content_plain_text"]
+                fields=[FIELD_CONTENT_PLAIN_TEXT]
             )
         except Exception as e:
             logger.error(f"Failed to fetch news content: {e}")
             raise ValueError(f"News item not found or cannot fetch: {news_id}")
-        
-        content_text = content_data.get("content_plain_text")
+
+        content_text = content_data.get(FIELD_CONTENT_PLAIN_TEXT)
         if not content_text:
             raise ValueError(f"News item {news_id} has no content")
-        
+
         # 3. Generate audio for each voice
         logger.info(f"Generating TTS audio for news_id={news_id} with {len(self.voices)} voices")
         audio_files = []
-        
+
         for voice in self.voices:
             try:
                 logger.info(f"Generating audio with voice: {voice['voice_id']}")
@@ -91,7 +91,7 @@ class NewsTTSService:
                     voice_id=voice["voice_id"],
                     upload_to_s3=True
                 )
-                
+
                 audio_info = {
                     "voice_id": voice["voice_id"],
                     "description": voice["description"],
@@ -102,11 +102,11 @@ class NewsTTSService:
                 }
                 audio_files.append(audio_info)
                 logger.info(f"Successfully generated audio: {audio_info['s3_key']}")
-                
+
             except Exception as e:
                 logger.error(f"Failed to generate audio with voice {voice['voice_id']}: {e}")
                 raise RuntimeError(f"TTS generation failed for voice {voice['voice_id']}: {e}")
-        
+
         # 4. Save to database
         if existing:
             # Update existing record
@@ -124,9 +124,9 @@ class NewsTTSService:
             db.commit()
             db.refresh(news_ai_result)
             logger.info(f"Created new AI result record for news_id={news_id}")
-        
+
         return audio_files, False
-    
+
     def get_cached_audio(self, news_id: int, db: Session) -> Optional[List[dict]]:
         """
         Get cached audio files for a news item without generating.
@@ -142,7 +142,7 @@ class NewsTTSService:
         if existing and existing.audio_files:
             return existing.audio_files
         return None
-    
+
     def delete_audio(self, news_id: int, db: Session) -> bool:
         """
         Delete cached audio for a news item.
