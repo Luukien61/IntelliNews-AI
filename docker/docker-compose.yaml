@@ -13,11 +13,10 @@ services:
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - minio-data:/data
-    restart: unless-stopped
     networks:
       - intellinews
   ai-db:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: ai-postgres
     environment:
       POSTGRES_DB: intellinews_ai
@@ -35,7 +34,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
+
+  # Redis - Caching for recommendation results
+  redis:
+    image: redis:8.2-alpine
+    container_name: intellinews-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - intellinews
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   intellinews:
@@ -46,3 +60,5 @@ volumes:
     driver: local
   intellinews-ai-service-db-data:
     external: true
+  redis-data:
+    driver: local

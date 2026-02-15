@@ -72,6 +72,56 @@ class NewsServiceClient:
                 return False
             raise
 
+    async def get_news_list_for_ai(self, page: int = 0, size: int = 50) -> dict:
+        """
+        Get paginated news list for AI processing (embedding generation).
+        
+        Args:
+            page: Page number (0-indexed)
+            size: Page size
+            
+        Returns:
+            Paginated response with lightweight news items
+            {content: [{id, title, description, category, publisherId}], totalPages, totalElements, ...}
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            url = f"{self.base_url}/api/v1/internal/news/list"
+            params = {"page": page, "size": size}
+            logger.info(f"Fetching news list for AI: page={page}, size={size}")
+            
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            logger.info(f"Fetched {len(data.get('content', []))} items (page {page})")
+            return data
+
+    async def get_news_by_category_for_ai(
+        self, category: str, page: int = 0, size: int = 50
+    ) -> dict:
+        """
+        Get news items by category for AI processing.
+        
+        Args:
+            category: News category (e.g., 'CONG_NGHE', 'THE_THAO')
+            page: Page number (0-indexed)
+            size: Page size
+            
+        Returns:
+            Paginated response with lightweight news items filtered by category
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            url = f"{self.base_url}/api/v1/internal/news/category/{category}"
+            params = {"page": page, "size": size}
+            logger.info(f"Fetching news by category '{category}' for AI: page={page}, size={size}")
+            
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            logger.info(f"Fetched {len(data.get('content', []))} items for category '{category}'")
+            return data
+
 
 # Global client instance
 news_client = NewsServiceClient()

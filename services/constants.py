@@ -8,3 +8,8 @@ KEY_NEWS_ID = "news_id"
 KEY_SUMMARY_SHORT = "summary_short"
 KEY_SUMMARY_DEFAULT = "summary_default"
 
+KEY_TITLE = "title"
+KEY_DESCRIPTION = "description"
+KEY_CONTENT = "content"
+KEY_ID = "id"
+KEY_CATEGORY = "category"

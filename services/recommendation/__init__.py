@@ -1,4 +1,21 @@
-from .service import RecommendationService
-from .models import RecommendationRequest, RecommendationResponse
+"""Recommendation service module."""
+from .models import (
+    RecommendationRequest,
+    RecommendationResponse,
+    RecommendedNewsItem,
+    IndexArticleRequest,
+    IndexBatchRequest,
+    IndexResponse
+)
+from .service import ContentRecommendationService, recommendation_service
 
-__all__ = ["RecommendationService", "RecommendationRequest", "RecommendationResponse"]
+__all__ = [
+    "RecommendationRequest",
+    "RecommendationResponse",
+    "RecommendedNewsItem",
+    "IndexArticleRequest",
+    "IndexBatchRequest",
+    "IndexResponse",
+    "ContentRecommendationService",
+    "recommendation_service",
+]

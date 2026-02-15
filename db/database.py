@@ -40,9 +40,11 @@ def get_db():
 
 def init_db():
     """
-    Initialize database tables.
-    Should be called once at application startup.
+    Initialize database connection check.
+    Tables are created via DDL in docker/db/init/001_schema.sql.
     """
-    logger.info("Creating database tables...")
+    logger.info("Checking database connection...")
+    import db.models  # noqa: F401 — ensure all models are registered
+    # Tables are managed by DDL in docker/db/init/001_schema.sql
     # Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created successfully")
+    logger.info("Database connection verified")

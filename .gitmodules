@@ -1,0 +1,3 @@
+[submodule "shared-proto"]
+	path = shared-proto
+	url = https://github.com/ThuyNga22/intellinews-shared-proto

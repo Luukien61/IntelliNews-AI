@@ -40,8 +40,13 @@ class Settings(BaseSettings):
     news_service_url: str = "http://localhost:8081"
     news_service_timeout: int = 30  # seconds
     
-    # Recommendation Configuration (Placeholder)
+    # Recommendation Configuration
     recommendation_model_path: str = ""
+    recommendation_cache_ttl: int = 3600  # Redis cache TTL in seconds (1 hour)
+    recommendation_top_k: int = 10  # Default number of recommendations
+    
+    # Redis Configuration (for recommendation caching)
+    redis_url: str = "redis://localhost:6379/0"
     
     # Summarization Configuration
     phobert_model_name: str = "vinai/phobert-base"
