@@ -39,85 +39,6 @@ async def list_voices():
         )
 
 
-@router.post("/generate", response_model=TTSResponse)
-async def generate_speech(request: TTSRequest):
-    """
-    Generate speech from text using VieNeu TTS.
-    
-    Args:
-        request: TTS generation request with text, optional voice_id, and optional voice cloning parameters
-        
-    Returns:
-        Response with audio file information and download URL
-    """
-    try:
-        logger.info(f"Received TTS request for text: {request.text[:50]}...")
-        if request.voice_id:
-            logger.info(f"Using voice: {request.voice_id}")
-        
-        # Generate speech
-        file_path = tts_service.synthesize(
-            text=request.text,
-            voice_id=request.voice_id,
-            ref_audio=request.ref_audio,
-            ref_text=request.ref_text
-        )
-        
-        # Extract filename from path
-        filename = Path(file_path).name
-        download_url = f"/api/tts/audio/{filename}"
-        
-        return TTSResponse(
-            success=True,
-            filename=filename,
-            file_path=file_path,
-            download_url=download_url,
-            message="Audio generated successfully"
-        )
-        
-    except Exception as e:
-        logger.error(f"TTS generation failed: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to generate speech: {str(e)}"
-        )
-
-
-@router.get("/audio/{filename}")
-async def get_audio_file(filename: str):
-    """
-    Download generated audio file.
-    
-    Args:
-        filename: Name of the audio file
-        
-    Returns:
-        Audio file as FileResponse
-    """
-    try:
-        file_path = tts_service.get_audio_path(filename)
-        
-        if not file_path:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Audio file not found: {filename}"
-            )
-        
-        return FileResponse(
-            path=file_path,
-            media_type="audio/wav",
-            filename=filename
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to retrieve audio file: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve audio file: {str(e)}"
-        )
-
 
 @router.get("/health")
 async def health_check():
@@ -217,7 +138,7 @@ async def get_news_audio(
     Returns:
         NewsTTSResponse with cached audio files or 404 if not found
     """
-    cached_audio = news_tts_service.get_cached_audio(news_id=news_id, db=db)
+    cached_audio = await news_tts_service.get_cached_audio(news_id=news_id, db=db)
     
     if not cached_audio:
         raise HTTPException(
@@ -260,7 +181,7 @@ async def delete_news_audio(
     Returns:
         Success message or 404 if not found
     """
-    deleted = news_tts_service.delete_audio(news_id=news_id, db=db)
+    deleted = await news_tts_service.delete_audio(news_id=news_id, db=db)
     
     if not deleted:
         raise HTTPException(

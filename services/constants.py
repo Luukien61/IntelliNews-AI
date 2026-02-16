@@ -13,3 +13,13 @@ KEY_DESCRIPTION = "description"
 KEY_CONTENT = "content"
 KEY_ID = "id"
 KEY_CATEGORY = "category"
+
+# TTS Related Keys
+KEY_VOICE_ID = "voice_id"
+KEY_URL = "url"
+KEY_S3_KEY = "s3_key"
+KEY_S3_URL = "s3_url"
+KEY_PRESIGNED_URL = "presigned_url"
+KEY_FILENAME = "filename"
+
+TTS_PREFIX_KEY = "tts:presigned"
