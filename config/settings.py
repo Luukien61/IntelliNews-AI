@@ -6,9 +6,10 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     model_config = SettingsConfigDict(
-        env_file=".env.production",
+        env_file=(".env", ".env.production"),
         env_file_encoding="utf-8",
-        case_sensitive=False
+        case_sensitive=False,
+        extra='ignore' # Allow extra environment variables
     )
     
     # Server Configuration
@@ -51,6 +52,17 @@ class Settings(BaseSettings):
     # Summarization Configuration
     phobert_model_name: str = "vinai/phobert-base"
     vit5_model_name: str = "VietAI/vit5-base-vietnews-summarization"
+    
+    # Kafka Configuration
+    kafka_bootstrap_servers: str = "localhost:29092"
+    kafka_group_id: str = "ai-service-group"
+    kafka_topic_news_fetched: str = "news.fetched-events"
+    kafka_auto_offset_reset: str = "latest"
+    kafka_event_concurrency: bool = True
+    
+    # AI Processing Configuration
+    ai_process_parallel: bool = True
+    ai_process_max_workers: int = 4
     
     @property
     def tts_output_path(self) -> Path:

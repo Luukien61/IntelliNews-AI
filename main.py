@@ -4,6 +4,7 @@ TTS, Recommendation, and Summarization services
 """
 import logging
 import warnings
+import asyncio
 
 # Suppress HuggingFace Hub deprecation warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="huggingface_hub")
@@ -19,6 +20,11 @@ logging.basicConfig(
     level=logging.INFO if settings.debug else logging.WARNING,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# Force INFO level for our own services if they are not already set
+if not settings.debug:
+    logging.getLogger("services").setLevel(logging.INFO)
+    logging.getLogger("api").setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +79,23 @@ async def startup_event():
         init_db()
     except Exception as e:
         logger.warning(f"Database initialization skipped: {e}")
+    
+    # Start Kafka Consumer in the background
+    try:
+        from services.kafka_consumer_service import kafka_consumer_service
+        asyncio.create_task(kafka_consumer_service.start())
+        logger.info("Kafka consumer task created")
+    except Exception as e:
+        logger.error(f"Failed to start Kafka consumer: {e}")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Application shutdown event."""
     logger.info("Shutting down IntelliNews AI Service")
+    try:
+        from services.kafka_consumer_service import kafka_consumer_service
+        kafka_consumer_service.stop()
+        logger.info("Kafka consumer stopped")
+    except Exception as e:
+        logger.error(f"Error stopping Kafka consumer: {e}")

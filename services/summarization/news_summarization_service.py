@@ -69,7 +69,8 @@ class NewsSummarizationService:
         self,
         news_id: int,
         db: Session,
-        force: bool = False
+        force: bool = False,
+        content_text: Optional[str] = None
     ) -> tuple[dict, bool]:
         """
         Get existing summaries or generate new ones.
@@ -78,6 +79,7 @@ class NewsSummarizationService:
             news_id: ID of the news item
             db: Database session
             force: If True, regenerate even if cached
+            content_text: Optional plain text content to avoid fetching from news-service
 
         Returns:
             Tuple of (result dict, cached: bool)
@@ -104,18 +106,19 @@ class NewsSummarizationService:
                 KEY_SUMMARY_DEFAULT: existing.summary_default,
             }, True
 
-        # 2. Fetch content from news-service
-        logger.info(f"Fetching content for news_id={news_id}")
-        try:
-            content_data = await news_client.get_news_content(
-                news_id=news_id,
-                fields=[FIELD_CONTENT_PLAIN_TEXT]
-            )
-        except Exception as e:
-            logger.error(f"Failed to fetch news content: {e}")
-            raise ValueError(f"News item not found or cannot fetch: {news_id}")
+        # 2. Get content
+        if not content_text:
+            logger.info(f"Fetching content for news_id={news_id}")
+            try:
+                content_data = await news_client.get_news_content(
+                    news_id=news_id,
+                    fields=[FIELD_CONTENT_PLAIN_TEXT]
+                )
+                content_text = content_data.get(FIELD_CONTENT_PLAIN_TEXT)
+            except Exception as e:
+                logger.error(f"Failed to fetch news content: {e}")
+                raise ValueError(f"News item not found or cannot fetch: {news_id}")
 
-        content_text = content_data.get(FIELD_CONTENT_PLAIN_TEXT)
         if not content_text:
             raise ValueError(f"News item {news_id} has no content")
 
