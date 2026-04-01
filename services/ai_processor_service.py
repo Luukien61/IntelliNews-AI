@@ -1,14 +1,13 @@
-import logging
 import asyncio
 import concurrent.futures
-from typing import Dict, Any, Optional, List
+import logging
+from typing import Dict, Any
 
 from config import settings
 from db.database import SessionLocal
-from services.summarization import news_summarization_service
-from services.tts import tts_service
-from services.recommendation import recommendation_service
 from db.models import NewsAIResult, NewsEmbedding
+from services.recommendation import recommendation_service
+from services.summarization.news_summarization_service import get_or_generate_summaries
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +77,7 @@ class AIProcessorService:
         # The existing news_summarization_service expects to fetch content.
         db = SessionLocal()
         try:
-            await news_summarization_service.get_or_generate_summaries(
+            await get_or_generate_summaries(
                 news_id, db, force=True, content_text=content
             )
         finally:

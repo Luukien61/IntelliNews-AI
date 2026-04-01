@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from config import settings
 from db.database import get_db
 from services.summarization.models import NewsSummarizationResponse
-from services.summarization.news_summarization_service import news_summarization_service
+from services.summarization.news_summarization_service import news_summarization_service, get_or_generate_summaries
 from services.constants import (
     KEY_NEWS_ID,
     KEY_SUMMARY_SHORT,
@@ -47,7 +47,7 @@ async def summarize_news(
     try:
         logger.info(f"Summarization request for news_id={news_id}, force={force}")
 
-        result, cached = await news_summarization_service.get_or_generate_summaries(
+        result, cached = await get_or_generate_summaries(
             news_id=news_id,
             db=db,
             force=force,
