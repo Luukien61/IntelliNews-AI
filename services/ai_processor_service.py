@@ -7,7 +7,7 @@ from config import settings
 from db.database import SessionLocal
 from db.models import NewsAIResult, NewsEmbedding
 from services.recommendation import recommendation_service
-from services.summarization.news_summarization_service import get_or_generate_summaries
+from services.summarization.service import summarization_service
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class AIProcessorService:
         # The existing news_summarization_service expects to fetch content.
         db = SessionLocal()
         try:
-            await get_or_generate_summaries(
+            await summarization_service.get_or_generate_summaries(
                 news_id, db, force=True, content_text=content
             )
         finally:

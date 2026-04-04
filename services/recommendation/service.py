@@ -21,6 +21,7 @@ from db.models import NewsEmbedding
 from services.news_client import news_client
 from .models import RecommendedNewsItem
 from ..constants import KEY_TITLE, KEY_DESCRIPTION, KEY_CONTENT, KEY_ID, KEY_CATEGORY
+from services.redis_service import redis_service
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,6 @@ class ContentRecommendationService:
     def __init__(self, model_name: str = None, device: str = None):
         self.model_name = model_name or settings.phobert_model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self._redis = None
         self._model = None
         self._tokenizer = None
         logger.info(f"ContentRecommendationService initialized (model will be lazy-loaded)")
@@ -54,22 +54,7 @@ class ContentRecommendationService:
             self._model.eval()
             logger.info("PhoBERT model loaded for recommendation service")
 
-    async def _get_redis(self):
-        """Get or create Redis connection (lazy initialization)."""
-        if self._redis is None:
-            try:
-                import redis.asyncio as aioredis
-                self._redis = aioredis.from_url(
-                    settings.redis_url,
-                    decode_responses=False
-                )
-                # Test connection
-                await self._redis.ping()
-                logger.info(f"Redis connected: {settings.redis_url}")
-            except Exception as e:
-                logger.warning(f"Redis not available, caching disabled: {e}")
-                self._redis = None
-        return self._redis
+
 
     def generate_embedding(self, text: str) -> np.ndarray:
         """
@@ -359,7 +344,7 @@ class ContentRecommendationService:
 
     async def _get_from_cache(self, key: str) -> Optional[List[RecommendedNewsItem]]:
         """Get recommendation results from Redis cache."""
-        redis = await self._get_redis()
+        redis = await redis_service.get_redis()
         if redis is None:
             return None
         try:
@@ -373,7 +358,7 @@ class ContentRecommendationService:
 
     async def _set_to_cache(self, key: str, items: List[RecommendedNewsItem]):
         """Store recommendation results in Redis cache."""
-        redis = await self._get_redis()
+        redis = await redis_service.get_redis()
         if redis is None:
             return
         try:
@@ -385,7 +370,7 @@ class ContentRecommendationService:
 
     async def _invalidate_cache(self):
         """Invalidate recommendation cache (when new articles are indexed)."""
-        redis = await self._get_redis()
+        redis = await redis_service.get_redis()
         if redis is None:
             return
         try:

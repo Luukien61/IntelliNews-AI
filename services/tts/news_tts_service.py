@@ -21,6 +21,7 @@ from services.constants import (
 from services.news_client import news_client
 from services.tts.service import tts_service
 from services.tts.storage import tts_storage
+from services.redis_service import redis_service
 
 logger = logging.getLogger(__name__)
 
@@ -50,23 +51,8 @@ class NewsTTSService:
             voices: List of voice configurations. Defaults to AVAILABLE_VOICES.
         """
         self.voices = voices or AVAILABLE_VOICES
-        self._redis = None
 
-    async def _get_redis(self):
-        """Get or create Redis connection (lazy initialization)."""
-        if self._redis is None:
-            try:
-                self._redis = aioredis.from_url(
-                    settings.redis_url,
-                    decode_responses=False
-                )
-                # Test connection
-                await self._redis.ping()
-                logger.info(f"Redis connected: {settings.redis_url}")
-            except Exception as e:
-                logger.warning(f"Redis not available: {e}")
-                self._redis = None
-        return self._redis
+
 
     async def _get_presigned_url_cached(self, s3_key: str) -> Optional[str]:
         """
@@ -76,7 +62,7 @@ class NewsTTSService:
             return None
 
         redis_key = f"{TTS_PREFIX_KEY}:{s3_key}"
-        redis = await self._get_redis()
+        redis = await redis_service.get_redis()
 
         # 1. Try to get from Redis
         if redis:
@@ -209,7 +195,7 @@ class NewsTTSService:
     async def _cache_presigned_url(self, s3_key: str, url: str):
         """Helper to cache a freshly generated URL"""
         try:
-            redis = await self._get_redis()
+            redis = await redis_service.get_redis()
             if redis:
                 await redis.set(f"{TTS_PREFIX_KEY}:{s3_key}", url, ex=86400 - 60)
         except Exception as e:
@@ -254,7 +240,7 @@ class NewsTTSService:
         if existing:
             # Also delete keys from Redis
             if existing.audio_files:
-                redis = await self._get_redis()
+                redis = await redis_service.get_redis()
                 if redis:
                     for audio in existing.audio_files:
                         s3_key = audio.get(KEY_S3_KEY)
