@@ -131,6 +131,48 @@ async def get_stats():
         }
 
 
+@router.get("/similar/{news_id}")
+async def get_similar_articles_by_id(
+        news_id: int,
+        limit: int = 10,
+        category_filter: str = None
+):
+    """
+    Get similar articles for a given news_id (lightweight service-to-service endpoint).
+
+    Returns a simple list of {news_id, similarity_score} for merging with
+    category-based recommendations in the news-service.
+    """
+    try:
+        logger.info(f"GET similar request for news_id={news_id}, limit={limit}")
+
+        recommendations, is_cached = await recommendation_service.get_similar_articles(
+            news_id=news_id,
+            limit=limit,
+            category_filter=category_filter
+        )
+
+        return {
+            "source_news_id": news_id,
+            "similar_items": [
+                {
+                    "news_id": r.news_id,
+                    "similarity_score": r.similarity_score,
+                    "category": r.category
+                }
+                for r in recommendations
+            ],
+            "cached": is_cached
+        }
+
+    except Exception as e:
+        logger.error(f"GET similar failed for news_id={news_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get similar articles: {str(e)}"
+        )
+
+
 @router.get("/health")
 async def health_check():
     """Check recommendation service health."""

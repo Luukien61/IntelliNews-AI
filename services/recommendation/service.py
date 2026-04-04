@@ -153,7 +153,7 @@ class ContentRecommendationService:
             db.commit()
 
             # Invalidate cache for this category
-            await self._invalidate_cache(category)
+            await self._invalidate_cache()
 
             logger.info(f"Indexed article {news_id} (category: {category})")
             return True
@@ -383,7 +383,7 @@ class ContentRecommendationService:
         except Exception as e:
             logger.warning(f"Cache write failed: {e}")
 
-    async def _invalidate_cache(self, category: Optional[str] = None):
+    async def _invalidate_cache(self):
         """Invalidate recommendation cache (when new articles are indexed)."""
         redis = await self._get_redis()
         if redis is None:
