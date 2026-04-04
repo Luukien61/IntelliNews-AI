@@ -29,7 +29,10 @@ class PhoBERTSummarizer(BaseSummarizer):
 
         self.model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModel.from_pretrained(self.model_name).to(self.device)
+        self.model = AutoModel.from_pretrained(
+            self.model_name,
+            low_cpu_mem_usage=False,
+        ).to(self.device)
         self.model.eval()
         logger.info("PhoBERT model loaded successfully")
 

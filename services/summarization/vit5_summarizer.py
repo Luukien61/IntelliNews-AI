@@ -32,8 +32,10 @@ class ViT5Summarizer(BaseSummarizer):
         self.model_name = model_name
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+            # low_cpu_mem_usage=False avoids meta-device init; .to() then fails on torch 2.x + recent transformers
             self.model = T5ForConditionalGeneration.from_pretrained(
-                self.model_name
+                self.model_name,
+                low_cpu_mem_usage=False,
             ).to(self.device)
             self.model.eval()
             logger.info(f"Successfully loaded ViT5 model: {self.model_name}")
@@ -43,7 +45,8 @@ class ViT5Summarizer(BaseSummarizer):
             self.model_name = "VietAI/vit5-base"
             self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
             self.model = T5ForConditionalGeneration.from_pretrained(
-                self.model_name
+                self.model_name,
+                low_cpu_mem_usage=False,
             ).to(self.device)
             self.model.eval()
             logger.info("Using fallback ViT5 base model")

@@ -23,14 +23,14 @@ logger = logging.getLogger(__name__)
 _phobert_summarizer = None
 _vit5_summarizer = None
 _position_summarizer = None
-_summarizer_init_lock = threading.Lock()
+from services.model_lock import global_model_load_lock
 
 
 def get_phobert_summarizer():
     """Lazy-load PhoBERT summarizer (heavy model)."""
     global _phobert_summarizer
     if _phobert_summarizer is None:
-        with _summarizer_init_lock:
+        with global_model_load_lock:
             if _phobert_summarizer is None:
                 from .phobert_summarizer import PhoBERTSummarizer
                 _phobert_summarizer = PhoBERTSummarizer(
@@ -43,7 +43,7 @@ def get_vit5_summarizer():
     """Lazy-load ViT5 summarizer (heavy model)."""
     global _vit5_summarizer
     if _vit5_summarizer is None:
-        with _summarizer_init_lock:
+        with global_model_load_lock:
             if _vit5_summarizer is None:
                 from .vit5_summarizer import ViT5Summarizer
                 _vit5_summarizer = ViT5Summarizer(
@@ -56,7 +56,7 @@ def get_position_summarizer():
     """Lazy-load Position summarizer (lightweight)."""
     global _position_summarizer
     if _position_summarizer is None:
-        with _summarizer_init_lock:
+        with global_model_load_lock:
             if _position_summarizer is None:
                 from .position_summarizer import PositionSummarizer
                 _position_summarizer = PositionSummarizer()

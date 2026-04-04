@@ -48,11 +48,14 @@ class ContentRecommendationService:
     def _ensure_model_loaded(self):
         """Lazy-load PhoBERT model (reuses same model as summarizer if already in memory)."""
         if self._model is None:
-            logger.info(f"Loading PhoBERT model: {self.model_name} on {self.device}")
-            self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            self._model = AutoModel.from_pretrained(self.model_name).to(self.device)
-            self._model.eval()
-            logger.info("PhoBERT model loaded for recommendation service")
+            from services.model_lock import global_model_load_lock
+            with global_model_load_lock:
+                if self._model is None:
+                    logger.info(f"Loading PhoBERT model: {self.model_name} on {self.device}")
+                    self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                    self._model = AutoModel.from_pretrained(self.model_name).to(self.device)
+                    self._model.eval()
+                    logger.info("PhoBERT model loaded for recommendation service")
 
 
 
