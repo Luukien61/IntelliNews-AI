@@ -69,6 +69,7 @@ class NewsEmbedding(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    published_at = Column(DateTime(timezone=True), server_default=func.now())
 
     def __repr__(self):
         return f"<NewsEmbedding(id={self.id}, news_id={self.news_id}, category={self.category})>"

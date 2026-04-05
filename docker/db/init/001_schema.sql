@@ -51,15 +51,18 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- News Embeddings table - stores PhoBERT embeddings for content-based recommendation
 CREATE TABLE IF NOT EXISTS news_embeddings
 (
-    id         BIGSERIAL PRIMARY KEY,
-    news_id    BIGINT      NOT NULL UNIQUE, -- Reference to news_items.id in news-service
-    category   VARCHAR(50) NOT NULL,        -- Cached category for filtering
-    title      TEXT        NOT NULL,        -- Cached title for response
-    embedding  VECTOR(768) NOT NULL,        -- PhoBERT CLS token embedding (768 dimensions)
+    id             BIGSERIAL PRIMARY KEY,
+    news_id        BIGINT      NOT NULL UNIQUE, -- Reference to news_items.id in news-service
+    category       VARCHAR(50) NOT NULL,        -- Cached category for filtering
+    title          TEXT        NOT NULL,        -- Cached title for response
+    embedding      VECTOR(768) NOT NULL,        -- PhoBERT CLS token embedding (768 dimensions)
+    cluster_id     INT,                         -- Optional cluster ID for grouping similar news items
+    trending_score FLOAT,                       -- Optional trending score for ranking
 
     -- Metadata
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    published_at   TIMESTAMPTZ,
+    updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes for performance
@@ -77,3 +80,26 @@ CREATE TRIGGER update_news_embeddings_updated_at
     ON news_embeddings
     FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
+
+---
+
+CREATE TABLE IF NOT EXISTS trending_clusters (
+    id                  BIGSERIAL PRIMARY KEY,
+    cluster_id          INT NOT NULL,
+    category            VARCHAR(50) NOT NULL,
+    article_count       INT NOT NULL DEFAULT 0,
+    trending_score      FLOAT NOT NULL DEFAULT 0,
+    summary             TEXT,                    -- LLM sinh ra
+    representative_ids  BIGINT[],                -- top 3 news_id đại diện
+    period_start        TIMESTAMPTZ,             -- window thời gian của cluster này
+    period_end          TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+
+    UNIQUE (cluster_id, category)                -- mỗi cluster chỉ 1 record per category
+);
+
+CREATE INDEX IF NOT EXISTS idx_trending_clusters_score 
+    ON trending_clusters (trending_score DESC);
+
+CREATE INDEX IF NOT EXISTS idx_trending_clusters_category
+    ON trending_clusters (category, trending_score DESC);

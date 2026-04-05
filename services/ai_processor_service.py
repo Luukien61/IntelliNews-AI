@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import logging
+from datetime import datetime, timezone
 from typing import Dict, Any
 
 from config import settings
@@ -33,6 +34,14 @@ class AIProcessorService:
         title = event_data.get("title", "")
         content = event_data.get("contentPlainText", "")
         category = event_data.get("category", "UNKNOWN")
+        published_at_raw = event_data.get("publishedAt")
+
+        published_at = None
+        if published_at_raw:
+            published_at = datetime.fromtimestamp(
+                float(published_at_raw),
+                tz=timezone.utc
+            )
 
         if news_id is None or not content:
             logger.error(f"Invalid event data: {event_data}")
@@ -59,13 +68,13 @@ class AIProcessorService:
                 logger.info(f"Step 2: Starting Summarization and Embedding in parallel for news_id={news_id_int}")
                 await asyncio.gather(
                     self._run_summarization(news_id_int, content),
-                    self._run_embedding(news_id_int, title, category)
+                    self._run_embedding(news_id_int, title, category, published_at)
                 )
             else:
                 logger.info(f"Step 2: Starting Summarization for news_id={news_id_int}")
                 await self._run_summarization(news_id_int, content)
                 logger.info(f"Step 3: Starting Embedding for news_id={news_id_int}")
-                await self._run_embedding(news_id_int, title, category)
+                await self._run_embedding(news_id_int, title, category, published_at)
 
             logger.info(f"Successfully processed all AI tasks for news_id={news_id_int}")
 
@@ -83,7 +92,7 @@ class AIProcessorService:
         finally:
             db.close()
 
-    async def _run_embedding(self, news_id: int, title: str, category: str):
+    async def _run_embedding(self, news_id: int, title: str, category: str, published_at):
         """Generate title embedding and store in DB."""
         # Check if already indexed
         db = SessionLocal()
@@ -100,7 +109,8 @@ class AIProcessorService:
                 news_id=news_id,
                 category=category,
                 title=title,
-                embedding=embedding
+                embedding=embedding,
+                published_at=published_at
             )
             db.add(news_embedding)
             db.commit()
