@@ -37,6 +37,7 @@ grpcio = "^1.78.0"
 grpcio-tools = "^1.78.0"
 protobuf = "^6.33.5"
 confluent-kafka = "^2.13.2"
+hdbscan = "^0.8.42"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.0"

@@ -89,8 +89,8 @@ CREATE TABLE IF NOT EXISTS trending_clusters (
     category            VARCHAR(50) NOT NULL,
     article_count       INT NOT NULL DEFAULT 0,
     trending_score      FLOAT NOT NULL DEFAULT 0,
-    summary             TEXT,                    -- LLM sinh ra
-    representative_ids  BIGINT[],                -- top 3 news_id đại diện
+    primary_rep_id      BIGINT,                  -- news_id tiêu biểu dùng để lấy summary
+    representative_ids  BIGINT[],                -- danh sách các news_id trong cluster
     period_start        TIMESTAMPTZ,             -- window thời gian của cluster này
     period_end          TIMESTAMPTZ,
     created_at          TIMESTAMPTZ DEFAULT NOW(),

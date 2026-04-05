@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     ai_process_parallel: bool = True
     ai_process_max_workers: int = 4
     
+    # Clustering Configuration
+    clustering_min_size: int = 3
+    clustering_min_samples: int = 2
+    clustering_epsilon: float = 0.15
+    clustering_lookback_hours: int = 24
+    clustering_window_hours: int = 2
+    clustering_decay_lambda: float = 0.25
+    
     @property
     def tts_output_path(self) -> Path:
         """Get TTS output directory as Path object."""

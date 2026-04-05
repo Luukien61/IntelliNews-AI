@@ -88,6 +88,13 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to start Kafka consumer: {e}")
 
+    # Start Clustering Scheduler
+    try:
+        from services.clustering.scheduler import clustering_scheduler
+        await clustering_scheduler.start()
+    except Exception as e:
+        logger.error(f"Failed to start clustering scheduler: {e}")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -99,3 +106,10 @@ async def shutdown_event():
         logger.info("Kafka consumer stopped")
     except Exception as e:
         logger.error(f"Error stopping Kafka consumer: {e}")
+
+    # Stop Clustering Scheduler
+    try:
+        from services.clustering.scheduler import clustering_scheduler
+        clustering_scheduler.stop()
+    except Exception as e:
+        logger.error(f"Error stopping clustering scheduler: {e}")
