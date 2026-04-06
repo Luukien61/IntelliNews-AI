@@ -1,19 +1,19 @@
 """
 Content-Based Recommendation Service for IntelliNews.
 
-Uses vietnamese-bi-encoder embeddings to find similar news articles based on
-title + description text. Embeddings are stored in PostgreSQL
-and recommendation results are cached in Redis.
+Uses SentenceTransformer (vietnamese-bi-encoder) embeddings to find similar
+news articles based on title + description text. Embeddings are stored in
+PostgreSQL and recommendation results are cached in Redis.
 """
 import logging
 import json
 from typing import List, Optional, Tuple
 
 import numpy as np
-import torch
-from transformers import AutoTokenizer, AutoModel
+from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy.orm import Session
+from underthesea import word_tokenize
 
 from config import settings
 from db.database import SessionLocal
@@ -28,11 +28,12 @@ logger = logging.getLogger(__name__)
 
 class ContentRecommendationService:
     """
-    Content-based recommendation using bi-encoder embeddings.
+    Content-based recommendation using SentenceTransformer embeddings.
     
     Flow:
-    1. Index: For each article, generate a 768-dim embedding (mean pooling)
-       from title + description, store in PostgreSQL.
+    1. Index: For each article, word-segment the text (underthesea),
+       then generate a 768-dim embedding via SentenceTransformer,
+       store in PostgreSQL.
     2. Recommend: Given a news_id, load its embedding, compute cosine similarity
        against all embeddings (optionally filtered by category), return top-K.
     3. Cache: Cache recommendation results in Redis with configurable TTL.
@@ -40,28 +41,27 @@ class ContentRecommendationService:
 
     def __init__(self, model_name: str = None, device: str = None):
         self.model_name = model_name or settings.embedding_model_name
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self._model = None
-        self._tokenizer = None
+        self.device = device or "cpu"
+        self._model: Optional[SentenceTransformer] = None
         logger.info(f"ContentRecommendationService initialized (model will be lazy-loaded)")
 
     def _ensure_model_loaded(self):
-        """Lazy-load embedding model."""
+        """Lazy-load SentenceTransformer model."""
         if self._model is None:
             from services.model_lock import global_model_load_lock
             with global_model_load_lock:
                 if self._model is None:
-                    logger.info(f"Loading embedding model: {self.model_name} on {self.device}")
-                    self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                    self._model = AutoModel.from_pretrained(self.model_name).to(self.device)
-                    self._model.eval()
-                    logger.info("Embedding model loaded for recommendation service")
-
-
+                    logger.info(f"Loading SentenceTransformer model: {self.model_name}")
+                    self._model = SentenceTransformer(self.model_name, device=self.device)
+                    logger.info("SentenceTransformer model loaded for recommendation service")
 
     def generate_embedding(self, text: str) -> List[float]:
         """
-        Generate a 768-dim embedding for the given text using mean pooling.
+        Generate a 768-dim embedding for the given text.
+        
+        Steps:
+        1. Vietnamese word segmentation via underthesea
+        2. Encode with SentenceTransformer
         
         Args:
             text: Input Vietnamese text (typically title + description)
@@ -71,32 +71,13 @@ class ContentRecommendationService:
         """
         self._ensure_model_loaded()
 
-        # vietnamese-bi-encoder handles tokenization natively (no word segmentation needed)
-        inputs = self._tokenizer(
-            text,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            max_length=256
-        ).to(self.device)
+        # Word segmentation (required by vietnamese-bi-encoder)
+        segmented_text = word_tokenize(text, format="text")
 
-        with torch.no_grad():
-            outputs = self._model(**inputs)
+        # SentenceTransformer.encode() handles tokenization + mean pooling internally
+        embedding = self._model.encode(segmented_text)
 
-        # Mean Pooling — better representation of whole text
-        # Mask padded tokens
-        attention_mask = inputs['attention_mask']
-        last_hidden_state = outputs.last_hidden_state
-        
-        # Multiply embeddings by the mask to ignore padding tokens
-        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
-        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
-        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-        
-        # Average the embeddings
-        mean_embedding = (sum_embeddings / sum_mask).cpu().numpy()[0]
-        
-        return mean_embedding.tolist()
+        return embedding.tolist()
 
     async def index_article(self, news_id: int) -> bool:
         """
@@ -137,9 +118,6 @@ class ContentRecommendationService:
             embedding = self.generate_embedding(text)
 
             # We need category info — fetch from the AI list endpoint
-            # For single article, we can get it from the content endpoint
-            # But the current internal API doesn't return category
-            # So we fetch from the list endpoint by searching
             category = await self._get_article_category(news_id)
 
             # Store in database (pgvector handles list→vector conversion)
@@ -299,12 +277,12 @@ class ContentRecommendationService:
 
             source_embedding = np.array(source.embedding)
 
-            # Load candidate embeddings (optionally filtered by category)
+            # Load candidate embeddings (filtered by the source article's category)
+            target_category = source.category
             query = db.query(NewsEmbedding).filter(
-                NewsEmbedding.news_id != news_id
+                NewsEmbedding.news_id != news_id,
+                NewsEmbedding.category == target_category
             )
-            if category_filter:
-                query = query.filter(NewsEmbedding.category == category_filter)
 
             candidates = query.all()
 
@@ -390,7 +368,6 @@ class ContentRecommendationService:
             return
         try:
             # Invalidate all recommendation keys (simple approach)
-            # In production, you'd use a more targeted pattern
             pattern = "rec:*"
             async for key in redis.scan_iter(match=pattern, count=100):
                 await redis.delete(key)
