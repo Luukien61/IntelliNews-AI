@@ -90,4 +90,5 @@ async def health_check():
             f"ViT5 ({settings.vit5_model_name})",
             "Position-based",
         ],
+        "embedding_model": settings.embedding_model_name,
     }

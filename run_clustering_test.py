@@ -1,7 +1,6 @@
 import asyncio
-import logging
 import json
-from datetime import datetime
+import logging
 
 # Cấu hình logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -14,7 +13,7 @@ async def main():
     # Chạy pipeline thủ công
     result = await clustering_service.run_pipeline()
     
-    print("\n✅ Kết quả trả về từ Pipeline:")
+    print("\nKết quả trả về từ Pipeline:")
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
 if __name__ == "__main__":

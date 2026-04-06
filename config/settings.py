@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     phobert_model_name: str = "vinai/phobert-base"
     vit5_model_name: str = "VietAI/vit5-base-vietnews-summarization"
     
+    # Embedding Model Configuration (for recommendation & clustering)
+    embedding_model_name: str = "bkai-foundation-models/vietnamese-bi-encoder"
+    
     # Kafka Configuration
     kafka_bootstrap_servers: str = "localhost:29092"
     kafka_group_id: str = "ai-service-group"
@@ -69,7 +72,7 @@ class Settings(BaseSettings):
     clustering_min_samples: int = 2
     clustering_epsilon: float = 0.15
     clustering_lookback_hours: int = 24
-    clustering_window_hours: int = 2
+    clustering_window_hours: int = 24
     clustering_decay_lambda: float = 0.25
     
     @property

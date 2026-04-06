@@ -49,6 +49,13 @@ class ClusteringService:
         Returns a summary dict for logging / API response.
         """
         logger.info("=== Clustering pipeline START ===")
+        logger.info(
+            f"Config: lookback={self.settings.clustering_lookback_hours}h, "
+            f"min_size={self.settings.clustering_min_size}, "
+            f"min_samples={self.settings.clustering_min_samples}, "
+            f"epsilon={self.settings.clustering_epsilon}, "
+            f"window={self.settings.clustering_window_hours}h"
+        )
 
         db: Session = SessionLocal()
         try:
@@ -188,6 +195,10 @@ class ClusteringService:
             rec["cluster_label"] = int(label)
             clusters[int(label)].append(rec)
 
+        for cid, items in clusters.items():
+            titles = [f"- {it['title']}" for it in items]
+            logger.info(f"Cluster {cid} ({len(items)} articles):\n" + "\n".join(titles))
+
         logger.info(
             f"Category '{category}': {len(clusters)} clusters found "
             f"(noise: {sum(1 for l in labels if l == -1)})"
@@ -301,7 +312,7 @@ class ClusteringService:
             db.execute(
                 text(
                     "UPDATE news_embeddings "
-                    "SET cluster_id = :cid, trending_score = NULL, updated_at = NOW() "
+                    "SET cluster_id = :cid, updated_at = NOW() "
                     "WHERE news_id = ANY(:ids)"
                 ),
                 {"cid": cluster_id, "ids": news_ids},

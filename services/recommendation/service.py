@@ -1,7 +1,7 @@
 """
 Content-Based Recommendation Service for IntelliNews.
 
-Uses PhoBERT embeddings to find similar news articles based on
+Uses vietnamese-bi-encoder embeddings to find similar news articles based on
 title + description text. Embeddings are stored in PostgreSQL
 and recommendation results are cached in Redis.
 """
@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 
 class ContentRecommendationService:
     """
-    Content-based recommendation using PhoBERT embeddings.
+    Content-based recommendation using bi-encoder embeddings.
     
     Flow:
-    1. Index: For each article, generate a 768-dim PhoBERT [CLS] embedding 
+    1. Index: For each article, generate a 768-dim embedding (mean pooling)
        from title + description, store in PostgreSQL.
     2. Recommend: Given a news_id, load its embedding, compute cosine similarity
        against all embeddings (optionally filtered by category), return top-K.
@@ -39,38 +39,39 @@ class ContentRecommendationService:
     """
 
     def __init__(self, model_name: str = None, device: str = None):
-        self.model_name = model_name or settings.phobert_model_name
+        self.model_name = model_name or settings.embedding_model_name
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self._model = None
         self._tokenizer = None
         logger.info(f"ContentRecommendationService initialized (model will be lazy-loaded)")
 
     def _ensure_model_loaded(self):
-        """Lazy-load PhoBERT model (reuses same model as summarizer if already in memory)."""
+        """Lazy-load embedding model."""
         if self._model is None:
             from services.model_lock import global_model_load_lock
             with global_model_load_lock:
                 if self._model is None:
-                    logger.info(f"Loading PhoBERT model: {self.model_name} on {self.device}")
+                    logger.info(f"Loading embedding model: {self.model_name} on {self.device}")
                     self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
                     self._model = AutoModel.from_pretrained(self.model_name).to(self.device)
                     self._model.eval()
-                    logger.info("PhoBERT model loaded for recommendation service")
+                    logger.info("Embedding model loaded for recommendation service")
 
 
 
-    def generate_embedding(self, text: str) -> np.ndarray:
+    def generate_embedding(self, text: str) -> List[float]:
         """
-        Generate a 768-dim PhoBERT [CLS] embedding for the given text.
+        Generate a 768-dim embedding for the given text using mean pooling.
         
         Args:
             text: Input Vietnamese text (typically title + description)
             
         Returns:
-            768-dim numpy array
+            768-dim list of floats
         """
         self._ensure_model_loaded()
 
+        # vietnamese-bi-encoder handles tokenization natively (no word segmentation needed)
         inputs = self._tokenizer(
             text,
             return_tensors="pt",
@@ -82,9 +83,20 @@ class ContentRecommendationService:
         with torch.no_grad():
             outputs = self._model(**inputs)
 
-        # Use [CLS] token embedding, convert to list for pgvector
-        embedding = outputs.last_hidden_state[:, 0, :].cpu().numpy()[0]
-        return embedding.tolist()
+        # Mean Pooling — better representation of whole text
+        # Mask padded tokens
+        attention_mask = inputs['attention_mask']
+        last_hidden_state = outputs.last_hidden_state
+        
+        # Multiply embeddings by the mask to ignore padding tokens
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(last_hidden_state.size()).float()
+        sum_embeddings = torch.sum(last_hidden_state * input_mask_expanded, 1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+        
+        # Average the embeddings
+        mean_embedding = (sum_embeddings / sum_mask).cpu().numpy()[0]
+        
+        return mean_embedding.tolist()
 
     async def index_article(self, news_id: int) -> bool:
         """

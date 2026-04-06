@@ -25,8 +25,8 @@ class TTSService:
 
     def __init__(self):
         """Initialize TTS service and load model if not already loaded."""
-        if self._tts_model is None:
-            self._load_model()
+        # if self._tts_model is None:
+        #     self._load_model()
 
     def _load_model(self):
         """Load VieNeu TTS model."""

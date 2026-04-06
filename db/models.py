@@ -46,15 +46,18 @@ class NewsAIResult(Base):
 
 class NewsEmbedding(Base):
     """
-    Model for storing PhoBERT embeddings of news articles.
+    Model for storing news article embeddings for recommendation & clustering.
     Uses pgvector's native vector type for efficient similarity search.
+    
+    The embedding model is configured via EMBEDDING_MODEL_NAME env variable
+    (default: bkai-foundation-models/vietnamese-bi-encoder).
     
     Attributes:
         id: Primary key
         news_id: Reference to news_items.id in news-service (unique)
         category: News category (cached for filtering)
         title: News title (cached for response)
-        embedding: 768-dim PhoBERT CLS embedding (pgvector vector type)
+        embedding: 768-dim embedding vector (pgvector vector type)
         created_at: Timestamp when embedding was generated
         updated_at: Timestamp when embedding was last updated
     """

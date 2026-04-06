@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS news_embeddings
     title          TEXT        NOT NULL,        -- Cached title for response
     embedding      VECTOR(768) NOT NULL,        -- PhoBERT CLS token embedding (768 dimensions)
     cluster_id     INT,                         -- Optional cluster ID for grouping similar news items
-    trending_score FLOAT,                       -- Optional trending score for ranking
+
 
     -- Metadata
     created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
