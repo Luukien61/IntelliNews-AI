@@ -22,6 +22,7 @@ from services.news_client import news_client
 from .models import RecommendedNewsItem
 from ..constants import KEY_TITLE, KEY_DESCRIPTION, KEY_CONTENT, KEY_ID, KEY_CATEGORY
 from services.redis_service import redis_service
+from services.utils.text import clean_text_for_ai
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +33,10 @@ class ContentRecommendationService:
     
     Flow:
     1. Index: For each article, word-segment the text (underthesea),
-       then generate a 768-dim embedding via SentenceTransformer,
+       then generate a normalized 768-dim embedding via SentenceTransformer,
        store in PostgreSQL.
     2. Recommend: Given a news_id, load its embedding, compute cosine similarity
-       against all embeddings (optionally filtered by category), return top-K.
+       against same-category embeddings, return top-K.
     3. Cache: Cache recommendation results in Redis with configurable TTL.
     """
 
@@ -57,27 +58,58 @@ class ContentRecommendationService:
 
     def generate_embedding(self, text: str) -> List[float]:
         """
-        Generate a 768-dim embedding for the given text.
+        Generate a normalized 768-dim embedding for the given text.
         
         Steps:
         1. Vietnamese word segmentation via underthesea
-        2. Encode with SentenceTransformer
+        2. Encode with SentenceTransformer (normalized)
         
         Args:
             text: Input Vietnamese text (typically title + description)
             
         Returns:
-            768-dim list of floats
+            768-dim normalized list of floats
         """
         self._ensure_model_loaded()
 
         # Word segmentation (required by vietnamese-bi-encoder)
         segmented_text = word_tokenize(text, format="text")
 
-        # SentenceTransformer.encode() handles tokenization + mean pooling internally
-        embedding = self._model.encode(segmented_text)
+        # SentenceTransformer.encode() handles tokenization + pooling internally
+        embedding = self._model.encode(
+            segmented_text,
+            normalize_embeddings=True,  # L2-normalize for cosine similarity
+            show_progress_bar=False
+        )
 
         return embedding.tolist()
+
+    def generate_embeddings_batch(self, texts: List[str], batch_size: int = 32) -> np.ndarray:
+        """
+        Generate normalized embeddings for a batch of texts.
+        Much faster than calling generate_embedding() in a loop.
+
+        Args:
+            texts: List of Vietnamese texts
+            batch_size: Batch size for encoding (tune based on RAM/GPU)
+
+        Returns:
+            numpy array of shape (len(texts), 768), L2-normalized
+        """
+        self._ensure_model_loaded()
+
+        # Word-segment all texts
+        segmented_texts = [word_tokenize(t, format="text") for t in texts]
+
+        # Batch encode
+        embeddings = self._model.encode(
+            segmented_texts,
+            batch_size=batch_size,
+            normalize_embeddings=True,
+            show_progress_bar=True
+        )
+
+        return embeddings
 
     async def index_article(self, news_id: int) -> bool:
         """
@@ -111,8 +143,9 @@ class ContentRecommendationService:
                 logger.warning(f"Article {news_id} has no title, skipping")
                 return False
 
-            # Combine title + description for embedding
+            # Combine title + description for embedding and clean it
             text = f"{title} {description}" if description else title
+            text = clean_text_for_ai(text)
 
             # Generate embedding
             embedding = self.generate_embedding(text)
@@ -163,6 +196,7 @@ class ContentRecommendationService:
     ) -> Tuple[int, int]:
         """
         Generate and store embeddings for a batch of articles.
+        Uses batch encoding for much faster performance.
         
         Args:
             page: Page number (0-indexed)
@@ -184,52 +218,52 @@ class ContentRecommendationService:
             logger.info("No articles to index")
             return 0, 0
 
-        indexed = 0
-        skipped = 0
         db: Session = SessionLocal()
 
         try:
             # Get already-indexed news_ids
-            existing_ids = set()
             article_ids = [a[KEY_ID] for a in articles]
             existing_records = db.query(NewsEmbedding.news_id).filter(
                 NewsEmbedding.news_id.in_(article_ids)
             ).all()
             existing_ids = {r.news_id for r in existing_records}
 
-            for article in articles:
-                news_id = article[KEY_ID]
+            # Filter to only new articles with titles
+            new_articles = [
+                a for a in articles
+                if a[KEY_ID] not in existing_ids and a.get(KEY_TITLE)
+            ]
 
-                if news_id in existing_ids:
-                    skipped += 1
-                    continue
+            if not new_articles:
+                skipped = len(articles)
+                logger.info(f"No new articles to index ({skipped} skipped)")
+                return 0, skipped
 
-                title = article.get(KEY_TITLE, "")
-                description = article.get(KEY_DESCRIPTION, "")
-                art_category = article.get(KEY_CATEGORY, "UNKNOWN")
+            # Prepare texts for batch encoding and clean them
+            texts = [
+                clean_text_for_ai(f"{a.get(KEY_TITLE, '')} {a.get(KEY_DESCRIPTION, '')}")
+                for a in new_articles
+            ]
 
-                if not title:
-                    skipped += 1
-                    continue
+            # Batch encode all at once (much faster than one-by-one)
+            embeddings = self.generate_embeddings_batch(texts, batch_size=32)
 
-                # Combine title + description
-                text = f"{title} {description}" if description else title
-
-                # Generate embedding
-                embedding = self.generate_embedding(text)
-
-                # Store in database (pgvector handles list→vector conversion)
+            # Store in database
+            for article, embedding in zip(new_articles, embeddings):
                 news_embedding = NewsEmbedding(
-                    news_id=news_id,
-                    category=art_category,
-                    title=title,
-                    embedding=embedding
+                    news_id=article[KEY_ID],
+                    category=article.get(KEY_CATEGORY, "UNKNOWN"),
+                    title=article.get(KEY_TITLE, ""),
+                    embedding=embedding.tolist()
                 )
                 db.add(news_embedding)
-                indexed += 1
 
             db.commit()
+
+            indexed = len(new_articles)
+            skipped = len(articles) - indexed
             logger.info(f"Batch indexing complete: {indexed} indexed, {skipped} skipped")
+            return indexed, skipped
 
         except Exception as e:
             db.rollback()
@@ -238,27 +272,33 @@ class ContentRecommendationService:
         finally:
             db.close()
 
-        return indexed, skipped
+    # ------------------------------------------------------------------
+    # Similarity search strategies
+    # ------------------------------------------------------------------
 
     async def get_similar_articles(
             self,
             news_id: int,
             limit: int = 10,
-            category_filter: Optional[str] = None
+            strategy: str = "pgvector"
     ) -> Tuple[List[RecommendedNewsItem], bool]:
         """
         Find similar articles based on cosine similarity of embeddings.
+        Automatically filters candidates by the source article's category.
         
         Args:
             news_id: Source article ID
             limit: Number of similar articles to return
-            category_filter: Optional category to filter results
+            strategy: Similarity computation strategy:
+                       "pgvector" — SQL-level cosine distance (recommended)
+                       "dot"      — numpy dot product (fast, requires normalized embeddings)
+                       "sklearn"  — sklearn cosine_similarity (fallback)
             
         Returns:
             Tuple of (list of RecommendedNewsItem, is_cached)
         """
         # Check Redis cache first
-        cache_key = f"rec:{news_id}:{limit}:{category_filter or 'all'}"
+        cache_key = f"rec:{news_id}:{limit}:cat"
         cached_result = await self._get_from_cache(cache_key)
         if cached_result is not None:
             logger.info(f"Cache hit for {cache_key}")
@@ -275,57 +315,20 @@ class ContentRecommendationService:
                 logger.warning(f"No embedding found for news_id={news_id}")
                 return [], False
 
-            source_embedding = np.array(source.embedding)
-
-            # Load candidate embeddings (filtered by the source article's category)
-            target_category = source.category
-            query = db.query(NewsEmbedding).filter(
-                NewsEmbedding.news_id != news_id,
-                NewsEmbedding.category == target_category
-            )
-
-            candidates = query.all()
-
-            if not candidates:
-                logger.info(f"No candidates found for similarity search")
-                return [], False
-
-            # Compute cosine similarity (pgvector returns lists, convert to numpy)
-            candidate_embeddings = np.array([
-                c.embedding for c in candidates
-            ])
-
-            similarities = cosine_similarity(
-                source_embedding.reshape(1, -1),
-                candidate_embeddings
-            )[0]
-
-            # Get top-K indices
-            top_k = min(limit, len(similarities))
-            top_indices = np.argsort(similarities)[::-1][:top_k]
-
-            # Build response
-            recommendations = []
-            for idx in top_indices:
-                candidate = candidates[idx]
-                score = float(similarities[idx])
-
-                # Skip very low similarity scores  
-                if score < 0.1:
-                    continue
-
-                recommendations.append(RecommendedNewsItem(
-                    news_id=candidate.news_id,
-                    title=candidate.title,
-                    category=candidate.category,
-                    similarity_score=round(score, 4)
-                ))
+            # Dispatch to the chosen strategy
+            if strategy == "pgvector":
+                recommendations = self._similar_pgvector(db, source, limit)
+            elif strategy == "dot":
+                recommendations = self._similar_dot_product(db, source, limit)
+            else:
+                recommendations = self._similar_sklearn(db, source, limit)
 
             # Cache the result in Redis
             await self._set_to_cache(cache_key, recommendations)
 
             logger.info(
-                f"Generated {len(recommendations)} recommendations for news_id={news_id}"
+                f"Generated {len(recommendations)} recommendations for news_id={news_id} "
+                f"(strategy={strategy})"
             )
             return recommendations, False
 
@@ -334,6 +337,138 @@ class ContentRecommendationService:
             raise
         finally:
             db.close()
+
+    def _similar_pgvector(
+            self, db: Session, source: NewsEmbedding, limit: int
+    ) -> List[RecommendedNewsItem]:
+        """
+        Strategy A — pgvector cosine distance (SQL-level, most scalable).
+        Pushes the computation to PostgreSQL; no need to load all embeddings into RAM.
+        """
+        results = (
+            db.query(NewsEmbedding)
+            .filter(
+                NewsEmbedding.news_id != source.news_id,
+                NewsEmbedding.category == source.category
+            )
+            .order_by(
+                NewsEmbedding.embedding.cosine_distance(source.embedding)
+            )
+            .limit(limit)
+            .all()
+        )
+
+        recommendations = []
+        for r in results:
+            # cosine_distance = 1 - cosine_similarity → convert back
+            source_emb = np.array(source.embedding)
+            candidate_emb = np.array(r.embedding)
+            score = float(np.dot(source_emb, candidate_emb) / (
+                np.linalg.norm(source_emb) * np.linalg.norm(candidate_emb)
+            ))
+
+            if score < 0.1:
+                continue
+
+            recommendations.append(RecommendedNewsItem(
+                news_id=r.news_id,
+                title=r.title,
+                category=r.category,
+                similarity_score=round(score, 4)
+            ))
+
+        return recommendations
+
+    def _similar_dot_product(
+            self, db: Session, source: NewsEmbedding, limit: int
+    ) -> List[RecommendedNewsItem]:
+        """
+        Strategy B — numpy dot product (fast, requires normalized embeddings).
+        When embeddings are L2-normalized, cosine_similarity = dot product.
+        """
+        candidates = (
+            db.query(NewsEmbedding)
+            .filter(
+                NewsEmbedding.news_id != source.news_id,
+                NewsEmbedding.category == source.category
+            )
+            .all()
+        )
+
+        if not candidates:
+            return []
+
+        source_embedding = np.array(source.embedding)
+        candidate_embeddings = np.array([c.embedding for c in candidates])
+
+        # dot product = cosine similarity when vectors are normalized
+        similarities = candidate_embeddings @ source_embedding
+
+        top_k = min(limit, len(similarities))
+        top_indices = np.argsort(similarities)[::-1][:top_k]
+
+        recommendations = []
+        for idx in top_indices:
+            score = float(similarities[idx])
+            if score < 0.1:
+                continue
+            candidate = candidates[idx]
+            recommendations.append(RecommendedNewsItem(
+                news_id=candidate.news_id,
+                title=candidate.title,
+                category=candidate.category,
+                similarity_score=round(score, 4)
+            ))
+
+        return recommendations
+
+    def _similar_sklearn(
+            self, db: Session, source: NewsEmbedding, limit: int
+    ) -> List[RecommendedNewsItem]:
+        """
+        Strategy C — sklearn cosine_similarity (original approach, fallback).
+        """
+        candidates = (
+            db.query(NewsEmbedding)
+            .filter(
+                NewsEmbedding.news_id != source.news_id,
+                NewsEmbedding.category == source.category
+            )
+            .all()
+        )
+
+        if not candidates:
+            return []
+
+        source_embedding = np.array(source.embedding)
+        candidate_embeddings = np.array([c.embedding for c in candidates])
+
+        similarities = cosine_similarity(
+            source_embedding.reshape(1, -1),
+            candidate_embeddings
+        )[0]
+
+        top_k = min(limit, len(similarities))
+        top_indices = np.argsort(similarities)[::-1][:top_k]
+
+        recommendations = []
+        for idx in top_indices:
+            score = float(similarities[idx])
+            if score < 0.1:
+                continue
+            candidate = candidates[idx]
+            recommendations.append(RecommendedNewsItem(
+                news_id=candidate.news_id,
+                title=candidate.title,
+                category=candidate.category,
+                similarity_score=round(score, 4)
+            ))
+
+        return recommendations
+
+    # ------------------------------------------------------------------
+    # Cache helpers
+    # ------------------------------------------------------------------
 
     async def _get_from_cache(self, key: str) -> Optional[List[RecommendedNewsItem]]:
         """Get recommendation results from Redis cache."""
@@ -367,7 +502,6 @@ class ContentRecommendationService:
         if redis is None:
             return
         try:
-            # Invalidate all recommendation keys (simple approach)
             pattern = "rec:*"
             async for key in redis.scan_iter(match=pattern, count=100):
                 await redis.delete(key)

@@ -13,7 +13,7 @@ import logging
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import hdbscan
 
 import numpy as np
@@ -54,7 +54,9 @@ class ClusteringService:
             f"min_size={self.settings.clustering_min_size}, "
             f"min_samples={self.settings.clustering_min_samples}, "
             f"epsilon={self.settings.clustering_epsilon}, "
-            f"window={self.settings.clustering_window_hours}h"
+            f"window={self.settings.clustering_window_hours}h, "
+            f"umap={'ON' if self.settings.clustering_umap_enabled else 'OFF'}"
+            f"{f' ({self.settings.clustering_umap_n_components}d)' if self.settings.clustering_umap_enabled else ''}"
         )
 
         db: Session = SessionLocal()
@@ -160,6 +162,32 @@ class ClusteringService:
         )
         return dict(grouped)
 
+    def get_all_embeddings_for_clustering(
+            self, category: Optional[str] = None
+    ) -> Tuple[List[int], np.ndarray]:
+        """
+        Export all embeddings (not just recent ones) for use with external clustering or re-clustering.
+
+        Args:
+            category: Optional category filter
+
+        Returns:
+            Tuple of (news_ids, embedding_matrix) where embedding_matrix
+            is a numpy array of shape (n, 768).
+        """
+        db: Session = SessionLocal()
+        try:
+            query = db.query(NewsEmbedding)
+            if category:
+                query = query.filter(NewsEmbedding.category == category)
+            records = query.all()
+
+            news_ids = [r.news_id for r in records]
+            embeddings = np.array([r.embedding for r in records], dtype=np.float32)
+            return news_ids, embeddings
+        finally:
+            db.close()
+
     # ------------------------------------------------------------------
     # Step 2 – HDBSCAN clustering
     # ------------------------------------------------------------------
@@ -171,12 +199,40 @@ class ClusteringService:
     ) -> Dict[int, List[Dict[str, Any]]]:
         """
         Run HDBSCAN on the records of a single category.
+        Optionally reduces dimensionality with UMAP first (768 → n_components).
         Returns {cluster_label: [records]} (noise label -1 excluded).
         """
         from sklearn.preprocessing import normalize
         embeddings_matrix = np.vstack([r["embedding"] for r in records])
-        # HDBSCAN BallTree doesn't support 'cosine' efficiently. 
-        # Using L2-normalized vectors with 'euclidean' distance is mathematically equivalent to cosine distance clustering.
+
+        # Optional UMAP dimension reduction (768 → n_components)
+        if (
+            self.settings.clustering_umap_enabled
+            and len(records) > self.settings.clustering_umap_n_neighbors
+        ):
+            import umap
+            logger.info(
+                f"Category '{category}': reducing {embeddings_matrix.shape[1]}d → "
+                f"{self.settings.clustering_umap_n_components}d with UMAP "
+                f"(n_neighbors={self.settings.clustering_umap_n_neighbors}, "
+                f"min_dist={self.settings.clustering_umap_min_dist})"
+            )
+            reducer = umap.UMAP(
+                n_components=self.settings.clustering_umap_n_components,
+                n_neighbors=self.settings.clustering_umap_n_neighbors,
+                min_dist=self.settings.clustering_umap_min_dist,
+                metric=self.settings.clustering_umap_metric,
+                random_state=42
+            )
+            embeddings_matrix = reducer.fit_transform(embeddings_matrix)
+        else:
+            if self.settings.clustering_umap_enabled:
+                logger.info(
+                    f"Category '{category}': skipping UMAP — only {len(records)} samples "
+                    f"(need > {self.settings.clustering_umap_n_neighbors})"
+                )
+
+        # L2-normalize for euclidean ≈ cosine distance
         embeddings_matrix = normalize(embeddings_matrix, norm='l2', axis=1)
 
         clusterer = hdbscan.HDBSCAN(

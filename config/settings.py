@@ -75,6 +75,13 @@ class Settings(BaseSettings):
     clustering_window_hours: int = 24
     clustering_decay_lambda: float = 0.25
     
+    # UMAP Dimension Reduction (before HDBSCAN)
+    clustering_umap_enabled: bool = True
+    clustering_umap_n_components: int = 50
+    clustering_umap_n_neighbors: int = 30
+    clustering_umap_min_dist: float = 0.0
+    clustering_umap_metric: str = "cosine"
+    
     @property
     def tts_output_path(self) -> Path:
         """Get TTS output directory as Path object."""

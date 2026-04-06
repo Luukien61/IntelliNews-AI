@@ -101,6 +101,9 @@ class TTSService:
             RuntimeError: If synthesis fails
         """
         try:
+            from services.utils.text import clean_text_for_ai
+            text = clean_text_for_ai(text)
+            
             logger.info(f"Synthesizing text: {text[:50]}...")
 
             # Generate audio
