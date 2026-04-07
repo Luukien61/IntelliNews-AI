@@ -74,11 +74,12 @@ class Settings(BaseSettings):
     clustering_lookback_hours: int = 24
     clustering_window_hours: int = 24
     clustering_decay_lambda: float = 0.25
+    clustering_coherence_threshold: float = 0.55  # Min avg cosine sim for valid cluster
     
     # UMAP Dimension Reduction (before HDBSCAN)
     clustering_umap_enabled: bool = True
     clustering_umap_n_components: int = 50
-    clustering_umap_n_neighbors: int = 30
+    clustering_umap_n_neighbors: int = 5       # Lowered from 30 to work with small categories
     clustering_umap_min_dist: float = 0.0
     clustering_umap_metric: str = "cosine"
     

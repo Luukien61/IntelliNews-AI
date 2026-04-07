@@ -265,6 +265,43 @@ class ClusteringService:
     # Step 3 – Trending score
     # ------------------------------------------------------------------
 
+    def _validate_cluster_coherence(
+        self,
+        articles: List[Dict[str, Any]],
+        min_avg_cosine: float = 0.75,
+    ) -> bool:
+        """
+        Trả về False nếu cluster không đủ coherent.
+        Tính avg pairwise cosine similarity giữa các bài trong cluster.
+        (Embeddings từ DB đã được L2-normalize lúc index)
+        """
+        if len(articles) < 2:
+            return True
+        
+        embeddings = np.vstack([a["embedding"] for a in articles])
+        
+        # Cosine similarity matrix
+        sim_matrix = embeddings @ embeddings.T
+        
+        # Lấy upper triangle (loại diagonal)
+        n = len(articles)
+        upper_indices = np.triu_indices(n, k=1)
+        avg_sim = sim_matrix[upper_indices].mean()
+        
+        logger.info(f"--- Cluster Coherence (avg: {avg_sim:.3f}) ---")
+        for i, j in zip(upper_indices[0], upper_indices[1]):
+            score = sim_matrix[i, j]
+            t1 = articles[i].get('title', str(articles[i].get('news_id')))[:50]
+            t2 = articles[j].get('title', str(articles[j].get('news_id')))[:50]
+            logger.info(f"  [{score:.3f}] {t1}... <-> {t2}...")
+        
+        if avg_sim < min_avg_cosine:
+            logger.info(
+                f"Cluster rejected: avg_cosine={avg_sim:.3f} < {min_avg_cosine}"
+            )
+            return False
+        return True
+
     def _score_clusters(
         self,
         category: str,
@@ -285,6 +322,12 @@ class ClusteringService:
         results: List[Dict[str, Any]] = []
 
         for cluster_id, articles in clusters.items():
+            # Validate trước khi score
+            if not self._validate_cluster_coherence(
+                articles, min_avg_cosine=self.settings.clustering_coherence_threshold
+            ):
+                continue
+
             article_count = len(articles)
 
             # --- Velocity multiplier ---
