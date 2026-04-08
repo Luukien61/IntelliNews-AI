@@ -9,6 +9,7 @@ from db.database import SessionLocal
 from db.models import NewsAIResult, NewsEmbedding
 from services.recommendation import recommendation_service
 from services.summarization.service import summarization_service
+from services.utils.text import clean_text_for_ai
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class AIProcessorService:
         """
         news_id = event_data.get("newsId")
         title = event_data.get("title", "")
+        description = event_data.get("description", "")
         content = event_data.get("contentPlainText", "")
         category = event_data.get("category", "UNKNOWN")
         published_at_raw = event_data.get("publishedAt")
@@ -68,13 +70,13 @@ class AIProcessorService:
                 logger.info(f"Step 2: Starting Summarization and Embedding in parallel for news_id={news_id_int}")
                 await asyncio.gather(
                     self._run_summarization(news_id_int, content),
-                    self._run_embedding(news_id_int, title, category, published_at)
+                    self._run_embedding(news_id_int, title, description, category, published_at)
                 )
             else:
                 logger.info(f"Step 2: Starting Summarization for news_id={news_id_int}")
                 await self._run_summarization(news_id_int, content)
                 logger.info(f"Step 3: Starting Embedding for news_id={news_id_int}")
-                await self._run_embedding(news_id_int, title, category, published_at)
+                await self._run_embedding(news_id_int, title, description, category, published_at)
 
             logger.info(f"Successfully processed all AI tasks for news_id={news_id_int}")
 
@@ -92,8 +94,8 @@ class AIProcessorService:
         finally:
             db.close()
 
-    async def _run_embedding(self, news_id: int, title: str, category: str, published_at):
-        """Generate title embedding and store in DB."""
+    async def _run_embedding(self, news_id: int, title: str, description: str, category: str, published_at):
+        """Generate title + description embedding and store in DB."""
         # Check if already indexed
         db = SessionLocal()
         try:
@@ -103,7 +105,9 @@ class AIProcessorService:
             if existing:
                 return
 
-            embedding = await asyncio.to_thread(recommendation_service.generate_embedding, title)
+            text = f"{title} {description}" if description else title
+            text = clean_text_for_ai(text)
+            embedding = await asyncio.to_thread(recommendation_service.generate_embedding, text)
             
             news_embedding = NewsEmbedding(
                 news_id=news_id,

@@ -202,7 +202,6 @@ class ClusteringService:
         Optionally reduces dimensionality with UMAP first (768 → n_components).
         Returns {cluster_label: [records]} (noise label -1 excluded).
         """
-        from sklearn.preprocessing import normalize
         embeddings_matrix = np.vstack([r["embedding"] for r in records])
 
         # Optional UMAP dimension reduction (768 → n_components)
@@ -231,9 +230,6 @@ class ClusteringService:
                     f"Category '{category}': skipping UMAP — only {len(records)} samples "
                     f"(need > {self.settings.clustering_umap_n_neighbors})"
                 )
-
-        # L2-normalize for euclidean ≈ cosine distance
-        embeddings_matrix = normalize(embeddings_matrix, norm='l2', axis=1)
 
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=self.settings.clustering_min_size,
