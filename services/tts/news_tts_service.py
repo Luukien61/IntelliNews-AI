@@ -250,7 +250,17 @@ class NewsTTSService:
                             except Exception:
                                 pass
 
-            # TODO: Also delete files from MinIO
+            # Delete audio files from MinIO/S3
+            if existing.audio_files:
+                for audio in existing.audio_files:
+                    s3_key = audio.get(KEY_S3_KEY)
+                    if s3_key:
+                        deleted = tts_storage.delete_object(s3_key)
+                        if deleted:
+                            logger.info(f"Deleted S3 object: {s3_key}")
+                        else:
+                            logger.warning(f"Failed to delete S3 object: {s3_key}")
+
             db.delete(existing)
             db.commit()
             logger.info(f"Deleted AI result record for news_id={news_id}")

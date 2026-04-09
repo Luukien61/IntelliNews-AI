@@ -45,14 +45,24 @@ class Settings(BaseSettings):
     recommendation_model_path: str = ""
     recommendation_cache_ttl: int = 3600  # Redis cache TTL in seconds (1 hour)
     recommendation_top_k: int = 10  # Default number of recommendations
-    
+    # Recency boost: final = (1 - weight) * similarity + weight * exp(-lambda * hours_old)
+    # weight=0.0 → pure similarity; weight=1.0 → pure recency
+    # lambda=0.1 → half-life ≈ 13.9h (article loses half its recency score after ~13.9h)
+    recommendation_recency_weight: float = 0.2
+    recommendation_recency_decay_lambda: float = 0.05
+
     # Redis Configuration (for recommendation caching)
     redis_url: str = "redis://localhost:6379/0"
     
     # Summarization Configuration
     phobert_model_name: str = "vinai/phobert-base"
-    vit5_model_name: str = "VietAI/vit5-base-vietnews-summarization"
-    
+    vit5_model_name: str = "VietAI/vit5-base-vietnews-summarization"  # kept for optional use
+    # Ratio of sentences to keep per summary type:
+    # summary_short  → TF-IDF extractive  (0.2 ≈ 2 sentences for a 10-sentence article)
+    # summary_default → PhoBERT extractive (0.3 ≈ 3 sentences)
+    summarization_short_ratio: float = 0.2
+    summarization_default_ratio: float = 0.3
+
     # Embedding Model Configuration (for recommendation & clustering)
     embedding_model_name: str = "bkai-foundation-models/vietnamese-bi-encoder"
     
@@ -75,7 +85,8 @@ class Settings(BaseSettings):
     clustering_window_hours: int = 24
     clustering_decay_lambda: float = 0.25
     clustering_coherence_threshold: float = 0.55  # Min avg cosine sim for valid cluster
-    
+    clustering_scheduler_interval_seconds: int = 7200  # 2 hours; configurable via env
+
     # UMAP Dimension Reduction (before HDBSCAN)
     clustering_umap_enabled: bool = True
     clustering_umap_n_components: int = 50

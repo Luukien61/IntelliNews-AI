@@ -1,8 +1,7 @@
 """News Summarization Service - orchestrates summarization for news articles."""
 import asyncio
 import logging
-import threading
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Lazy-loaded summarizer singletons (may be used from asyncio.to_thread workers)
 _phobert_summarizer = None
-_vit5_summarizer = None
+_tfidf_summarizer = None
 _position_summarizer = None
 from services.model_lock import global_model_load_lock
 
@@ -39,17 +38,15 @@ def get_phobert_summarizer():
     return _phobert_summarizer
 
 
-def get_vit5_summarizer():
-    """Lazy-load ViT5 summarizer (heavy model)."""
-    global _vit5_summarizer
-    if _vit5_summarizer is None:
+def get_tfidf_summarizer():
+    """Lazy-load TF-IDF summarizer (lightweight, no ML model)."""
+    global _tfidf_summarizer
+    if _tfidf_summarizer is None:
         with global_model_load_lock:
-            if _vit5_summarizer is None:
-                from .vit5_summarizer import ViT5Summarizer
-                _vit5_summarizer = ViT5Summarizer(
-                    model_name=settings.vit5_model_name
-                )
-    return _vit5_summarizer
+            if _tfidf_summarizer is None:
+                from .tfidf_summarizer import TFIDFSummarizer
+                _tfidf_summarizer = TFIDFSummarizer()
+    return _tfidf_summarizer
 
 
 def get_position_summarizer():
@@ -65,30 +62,34 @@ def get_position_summarizer():
 
 def _generate_summaries_from_text(content_text: str) -> Tuple[str, str]:
     """
-    Run ViT5 + PhoBERT (CPU/GPU-heavy, synchronous).
+    Run TF-IDF (summary_short) + PhoBERT (summary_default), synchronous.
     Must be executed via asyncio.to_thread so the FastAPI event loop stays responsive.
+
+    summary_short  – TF-IDF extractive (2–3 key sentences, no ML model needed).
+                     Replaced ViT5 which generated outputs as short as a single title.
+    summary_default – PhoBERT extractive (30 % of sentences, semantic scoring).
     """
-    # 1. ViT5 → summary_short
-    logger.info("Generating ViT5 summary (worker thread)")
+    # 1. TF-IDF → summary_short
+    logger.info("Generating TF-IDF summary_short (worker thread)")
     try:
-        vit5 = get_vit5_summarizer()
-        summary_short = vit5.summarize(content_text)
+        tfidf = get_tfidf_summarizer()
+        summary_short = tfidf.summarize(content_text, ratio=settings.summarization_short_ratio)
     except Exception as e:
-        logger.error(f"ViT5 summarization failed: {e}")
+        logger.error(f"TF-IDF summarization failed: {e}")
         logger.info("Falling back to Position-based summarizer for summary_short")
         position = get_position_summarizer()
-        summary_short = position.summarize(content_text, ratio=0.2)
+        summary_short = position.summarize(content_text, ratio=settings.summarization_short_ratio)
 
     # 2. PhoBERT → summary_default
-    logger.info("Generating PhoBERT summary (worker thread)")
+    logger.info("Generating PhoBERT summary_default (worker thread)")
     try:
         phobert = get_phobert_summarizer()
-        summary_default = phobert.summarize(content_text)
+        summary_default = phobert.summarize(content_text, ratio=settings.summarization_default_ratio)
     except Exception as e:
         logger.error(f"PhoBERT summarization failed: {e}")
         logger.info("Falling back to Position-based summarizer for summary_default")
         position = get_position_summarizer()
-        summary_default = position.summarize(content_text, ratio=0.3)
+        summary_default = position.summarize(content_text, ratio=settings.summarization_default_ratio)
 
     return summary_short, summary_default
 

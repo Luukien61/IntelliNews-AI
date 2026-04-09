@@ -7,6 +7,8 @@ PostgreSQL and recommendation results are cached in Redis.
 """
 import logging
 import json
+import math
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -273,6 +275,48 @@ class ContentRecommendationService:
             db.close()
 
     # ------------------------------------------------------------------
+    # Recency boost
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_recency(published_at, now: datetime, decay_lambda: float) -> float:
+        """
+        Exponential recency score in [0, 1].
+        Returns 1.0 for brand-new articles, decays toward 0 as articles age.
+        Half-life = ln(2) / decay_lambda  (default λ=0.1 → half-life ≈ 6.9 h).
+        Returns 0.0 when published_at is None (treated as very old).
+        """
+        if published_at is None:
+            return 0.0
+        try:
+            pub = (
+                published_at.astimezone(timezone.utc)
+                if published_at.tzinfo
+                else published_at.replace(tzinfo=timezone.utc)
+            )
+            hours_old = max(0.0, (now - pub).total_seconds() / 3600)
+            return math.exp(-decay_lambda * hours_old)
+        except Exception:
+            return 0.0
+
+    def _boosted_score(self, similarity: float, published_at, now: datetime) -> float:
+        """
+        Blend cosine similarity with recency boost.
+
+        final = (1 − w) × similarity + w × recency
+            w  = settings.recommendation_recency_weight  (default 0.3)
+            recency = exp(−λ × hours_old)
+
+        This keeps the score in [0, 1] and only penalises older articles
+        relative to fresher ones of equal content similarity.
+        """
+        w = settings.recommendation_recency_weight
+        recency = self._compute_recency(
+            published_at, now, settings.recommendation_recency_decay_lambda
+        )
+        return round((1.0 - w) * similarity + w * recency, 4)
+
+    # ------------------------------------------------------------------
     # Similarity search strategies
     # ------------------------------------------------------------------
 
@@ -343,8 +387,11 @@ class ContentRecommendationService:
     ) -> List[RecommendedNewsItem]:
         """
         Strategy A — pgvector cosine distance (SQL-level, most scalable).
-        Pushes the computation to PostgreSQL; no need to load all embeddings into RAM.
+        Fetches limit×3 candidates first, then re-ranks with recency boost.
         """
+        now = datetime.now(timezone.utc)
+        fetch_limit = limit * 3  # over-fetch so recency re-ranking doesn't cut good results
+
         results = (
             db.query(NewsEmbedding)
             .filter(
@@ -354,30 +401,31 @@ class ContentRecommendationService:
             .order_by(
                 NewsEmbedding.embedding.cosine_distance(source.embedding)
             )
-            .limit(limit)
+            .limit(fetch_limit)
             .all()
         )
 
+        source_emb = np.array(source.embedding)
         recommendations = []
         for r in results:
-            # cosine_distance = 1 - cosine_similarity → convert back
-            source_emb = np.array(source.embedding)
             candidate_emb = np.array(r.embedding)
-            score = float(np.dot(source_emb, candidate_emb) / (
-                np.linalg.norm(source_emb) * np.linalg.norm(candidate_emb)
-            ))
+            norm = np.linalg.norm(source_emb) * np.linalg.norm(candidate_emb)
+            similarity = float(np.dot(source_emb, candidate_emb) / norm) if norm else 0.0
 
-            if score < 0.1:
+            if similarity < 0.1:
                 continue
 
+            final_score = self._boosted_score(similarity, r.published_at, now)
             recommendations.append(RecommendedNewsItem(
                 news_id=r.news_id,
                 title=r.title,
                 category=r.category,
-                similarity_score=round(score, 4)
+                similarity_score=final_score,
             ))
 
-        return recommendations
+        # Re-rank after recency boost and return top limit
+        recommendations.sort(key=lambda x: x.similarity_score, reverse=True)
+        return recommendations[:limit]
 
     def _similar_dot_product(
             self, db: Session, source: NewsEmbedding, limit: int
@@ -398,26 +446,32 @@ class ContentRecommendationService:
         if not candidates:
             return []
 
+        now = datetime.now(timezone.utc)
         source_embedding = np.array(source.embedding)
         candidate_embeddings = np.array([c.embedding for c in candidates])
 
         # dot product = cosine similarity when vectors are normalized
         similarities = candidate_embeddings @ source_embedding
 
-        top_k = min(limit, len(similarities))
-        top_indices = np.argsort(similarities)[::-1][:top_k]
+        # Apply recency boost before ranking
+        boosted = np.array([
+            self._boosted_score(float(sim), c.published_at, now)
+            for sim, c in zip(similarities, candidates)
+        ])
+
+        top_k = min(limit, len(boosted))
+        top_indices = np.argsort(boosted)[::-1][:top_k]
 
         recommendations = []
         for idx in top_indices:
-            score = float(similarities[idx])
-            if score < 0.1:
+            if float(similarities[idx]) < 0.1:   # filter on raw similarity, not boosted
                 continue
             candidate = candidates[idx]
             recommendations.append(RecommendedNewsItem(
                 news_id=candidate.news_id,
                 title=candidate.title,
                 category=candidate.category,
-                similarity_score=round(score, 4)
+                similarity_score=float(boosted[idx]),
             ))
 
         return recommendations
@@ -440,6 +494,7 @@ class ContentRecommendationService:
         if not candidates:
             return []
 
+        now = datetime.now(timezone.utc)
         source_embedding = np.array(source.embedding)
         candidate_embeddings = np.array([c.embedding for c in candidates])
 
@@ -448,20 +503,25 @@ class ContentRecommendationService:
             candidate_embeddings
         )[0]
 
-        top_k = min(limit, len(similarities))
-        top_indices = np.argsort(similarities)[::-1][:top_k]
+        # Apply recency boost before ranking
+        boosted = np.array([
+            self._boosted_score(float(sim), c.published_at, now)
+            for sim, c in zip(similarities, candidates)
+        ])
+
+        top_k = min(limit, len(boosted))
+        top_indices = np.argsort(boosted)[::-1][:top_k]
 
         recommendations = []
         for idx in top_indices:
-            score = float(similarities[idx])
-            if score < 0.1:
+            if float(similarities[idx]) < 0.1:   # filter on raw similarity, not boosted
                 continue
             candidate = candidates[idx]
             recommendations.append(RecommendedNewsItem(
                 news_id=candidate.news_id,
                 title=candidate.title,
                 category=candidate.category,
-                similarity_score=round(score, 4)
+                similarity_score=float(boosted[idx]),
             ))
 
         return recommendations

@@ -8,10 +8,12 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from config import settings
+
 logger = logging.getLogger(__name__)
 
-# Interval in seconds (2 hours)
-CLUSTERING_INTERVAL_SECONDS = 2 * 60 * 60
+# Read interval from settings (default 2 h); override via CLUSTERING_SCHEDULER_INTERVAL_SECONDS env var
+CLUSTERING_INTERVAL_SECONDS = settings.clustering_scheduler_interval_seconds
 
 # Initial delay before first run (60 seconds after startup — let models warm up)
 INITIAL_DELAY_SECONDS = 60
