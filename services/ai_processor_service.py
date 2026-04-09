@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 from config import settings
+from services.cpu_limiter import set_torch_threads
 from db.database import SessionLocal
 from db.models import NewsAIResult, NewsEmbedding
 from services.recommendation import recommendation_service
@@ -17,11 +18,25 @@ class AIProcessorService:
     """
     Coordinates AI processing (Summarization, TTS, Embedding) for news items.
     Can run tasks sequentially or in parallel.
+    
+    Respects ai_max_cores setting to limit CPU usage during intensive operations.
+    Tracks active_tasks to coordinate with clustering scheduler.
     """
 
     def __init__(self):
+        # Limit thread pool based on ai_max_cores setting
+        max_workers = min(settings.ai_process_max_workers, settings.ai_max_cores)
         self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=settings.ai_process_max_workers
+            max_workers=max_workers
+        )
+        self.active_tasks = 0
+        
+        # Set PyTorch thread limit (if torch is available)
+        set_torch_threads(settings.ai_max_cores)
+        
+        logger.info(
+            f"AIProcessorService initialized with max_workers={max_workers} "
+            f"(ai_max_cores={settings.ai_max_cores})"
         )
 
     async def process_news_item(self, event_data: Dict[str, Any]):
@@ -48,6 +63,8 @@ class AIProcessorService:
         if news_id is None or not content:
             logger.error(f"Invalid event data: {event_data}")
             return
+
+        self.active_tasks += 1
 
         # Explicitly cast to int to satisfy type checker
         news_id_int = int(news_id)
@@ -82,6 +99,8 @@ class AIProcessorService:
 
         except Exception as e:
             logger.error(f"Error processing news_id={news_id_int}: {e}", exc_info=True)
+        finally:
+            self.active_tasks -= 1
 
     async def _run_summarization(self, news_id: int, content: str):
         """Generate summaries and store in DB."""

@@ -1,5 +1,10 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
 from pathlib import Path
+import multiprocessing
+
+def get_default_cores() -> int:
+    return max(1, multiprocessing.cpu_count() // 2)
 
 
 class Settings(BaseSettings):
@@ -56,9 +61,11 @@ class Settings(BaseSettings):
     
     # Summarization Configuration
     phobert_model_name: str = "vinai/phobert-base"
-    vit5_model_name: str = "VietAI/vit5-base-vietnews-summarization"  # kept for optional use
+    vit5_model_name: str = "VietAI/vit5-base-vietnews-summarization"
+    # ViT5 min output length (90 or 128 characters)
+    vit5_min_length: int = 90  # Minimum length for ViT5 generated summaries
     # Ratio of sentences to keep per summary type:
-    # summary_short  → TF-IDF extractive  (0.2 ≈ 2 sentences for a 10-sentence article)
+    # summary_short  → ViT5 abstractive (min 128/90 chars, configurable)
     # summary_default → PhoBERT extractive (0.3 ≈ 3 sentences)
     summarization_short_ratio: float = 0.2
     summarization_default_ratio: float = 0.3
@@ -76,6 +83,7 @@ class Settings(BaseSettings):
     # AI Processing Configuration
     ai_process_parallel: bool = True
     ai_process_max_workers: int = 4
+    ai_max_cores: int = Field(default_factory=get_default_cores)
     
     # Clustering Configuration
     clustering_min_size: int = 3
@@ -93,6 +101,9 @@ class Settings(BaseSettings):
     clustering_umap_n_neighbors: int = 5       # Lowered from 30 to work with small categories
     clustering_umap_min_dist: float = 0.0
     clustering_umap_metric: str = "cosine"
+    
+    # Cluster Data Expiry (cleanup old clusters from trending_clusters table)
+    clustering_expiry_hours: int = 24  # Remove clusters older than this many hours
     
     @property
     def tts_output_path(self) -> Path:

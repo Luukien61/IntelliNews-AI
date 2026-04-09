@@ -2,6 +2,11 @@
 IntelliNews AI Service - FastAPI Application
 TTS, Recommendation, and Summarization services
 """
+# IMPORTANT: Import cpu_limiter FIRST before any AI libraries
+# This sets environment variables to limit CPU usage
+import services.cpu_limiter
+
+import os
 import logging
 import warnings
 import asyncio
@@ -72,6 +77,18 @@ async def startup_event():
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"API prefix: {settings.api_prefix}")
+    
+    # Configure PyTorch CPU threads mapping to ai_max_cores
+    try:
+        import torch
+        import os
+        os.environ["OMP_NUM_THREADS"] = str(settings.ai_max_cores)
+        os.environ["MKL_NUM_THREADS"] = str(settings.ai_max_cores)
+        torch.set_num_threads(settings.ai_max_cores)
+        torch.set_num_interop_threads(settings.ai_max_cores)
+        logger.info(f"PyTorch max cores configured to: {settings.ai_max_cores}")
+    except Exception as e:
+        logger.warning(f"Could not configure PyTorch thread count: {e}")
     
     # Initialize database tables (optional - can use migrations instead)
     try:

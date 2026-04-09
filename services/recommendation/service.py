@@ -56,6 +56,15 @@ class ContentRecommendationService:
                 if self._model is None:
                     logger.info(f"Loading SentenceTransformer model: {self.model_name}")
                     self._model = SentenceTransformer(self.model_name, device=self.device)
+                    
+                    # Warm up underthesea tokenizer while holding the lock
+                    # to prevent multi-threading race conditions on first use
+                    try:
+                        logger.info("Warming up underthesea word_tokenize...")
+                        word_tokenize("warm up", format="text")
+                    except Exception as e:
+                        logger.warning(f"Failed to warm up underthesea tokenizer: {e}")
+                        
                     logger.info("SentenceTransformer model loaded for recommendation service")
 
     def generate_embedding(self, text: str) -> List[float]:
@@ -72,10 +81,18 @@ class ContentRecommendationService:
         Returns:
             768-dim normalized list of floats
         """
+        if not text or not text.strip():
+            raise ValueError("Input text is empty or None")
+            
         self._ensure_model_loaded()
 
-        # Word segmentation (required by vietnamese-bi-encoder)
-        segmented_text = word_tokenize(text, format="text")
+        try:
+            # Word segmentation (required by vietnamese-bi-encoder)
+            segmented_text = word_tokenize(text, format="text")
+        except Exception as e:
+            logger.error(f"underthesea word_tokenize failed: {e}")
+            logger.warning("Falling back to unsegmented text (may reduce quality)")
+            segmented_text = text
 
         # SentenceTransformer.encode() handles tokenization + pooling internally
         embedding = self._model.encode(
@@ -100,8 +117,13 @@ class ContentRecommendationService:
         """
         self._ensure_model_loaded()
 
-        # Word-segment all texts
-        segmented_texts = [word_tokenize(t, format="text") for t in texts]
+        try:
+            # Word-segment all texts
+            segmented_texts = [word_tokenize(t, format="text") for t in texts]
+        except Exception as e:
+            logger.error(f"underthesea word_tokenize failed in batch: {e}")
+            logger.warning("Falling back to unsegmented texts (may reduce quality)")
+            segmented_texts = texts
 
         # Batch encode
         embeddings = self._model.encode(

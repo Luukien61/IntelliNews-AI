@@ -23,11 +23,13 @@ class ViT5Summarizer(BaseSummarizer):
     def __init__(
         self,
         model_name: str = "VietAI/vit5-base-vietnews-summarization",
-        device: str = None
+        device: str = None,
+        min_length: int = 64
     ):
         super().__init__(name="ViT5")
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Initializing ViT5 on {self.device}")
+        self.min_length = min_length  # Configurable min output length (90 or 128)
+        logger.info(f"Initializing ViT5 on {self.device} with min_length={min_length}")
 
         self.model_name = model_name
         try:
@@ -99,7 +101,7 @@ class ViT5Summarizer(BaseSummarizer):
                         inputs.input_ids,
                         attention_mask=inputs.attention_mask,
                         max_length=256,
-                        min_length=30,
+                        min_length=self.min_length,  # Use configurable min_length
                         num_beams=4,
                         length_penalty=2.0,
                         early_stopping=True,

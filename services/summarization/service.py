@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Lazy-loaded summarizer singletons (may be used from asyncio.to_thread workers)
 _phobert_summarizer = None
-_tfidf_summarizer = None
+_vit5_summarizer = None
 _position_summarizer = None
 from services.model_lock import global_model_load_lock
 
@@ -38,15 +38,18 @@ def get_phobert_summarizer():
     return _phobert_summarizer
 
 
-def get_tfidf_summarizer():
-    """Lazy-load TF-IDF summarizer (lightweight, no ML model)."""
-    global _tfidf_summarizer
-    if _tfidf_summarizer is None:
+def get_vit5_summarizer():
+    """Lazy-load ViT5 summarizer (abstractive, min_length configurable)."""
+    global _vit5_summarizer
+    if _vit5_summarizer is None:
         with global_model_load_lock:
-            if _tfidf_summarizer is None:
-                from .tfidf_summarizer import TFIDFSummarizer
-                _tfidf_summarizer = TFIDFSummarizer()
-    return _tfidf_summarizer
+            if _vit5_summarizer is None:
+                from .vit5_summarizer import ViT5Summarizer
+                _vit5_summarizer = ViT5Summarizer(
+                    model_name=settings.vit5_model_name,
+                    min_length=settings.vit5_min_length
+                )
+    return _vit5_summarizer
 
 
 def get_position_summarizer():
@@ -62,20 +65,20 @@ def get_position_summarizer():
 
 def _generate_summaries_from_text(content_text: str) -> Tuple[str, str]:
     """
-    Run TF-IDF (summary_short) + PhoBERT (summary_default), synchronous.
+    Run ViT5 (summary_short) + PhoBERT (summary_default), synchronous.
     Must be executed via asyncio.to_thread so the FastAPI event loop stays responsive.
 
-    summary_short  – TF-IDF extractive (2–3 key sentences, no ML model needed).
-                     Replaced ViT5 which generated outputs as short as a single title.
+    summary_short  – ViT5 abstractive (min 128/90 chars, configurable).
+                     Generates natural language summaries with min_length constraint.
     summary_default – PhoBERT extractive (30 % of sentences, semantic scoring).
     """
-    # 1. TF-IDF → summary_short
-    logger.info("Generating TF-IDF summary_short (worker thread)")
+    # 1. ViT5 → summary_short
+    logger.info("Generating ViT5 summary_short (worker thread)")
     try:
-        tfidf = get_tfidf_summarizer()
-        summary_short = tfidf.summarize(content_text, ratio=settings.summarization_short_ratio)
+        vit5 = get_vit5_summarizer()
+        summary_short = vit5.summarize(content_text, ratio=settings.summarization_short_ratio)
     except Exception as e:
-        logger.error(f"TF-IDF summarization failed: {e}")
+        logger.error(f"ViT5 summarization failed: {e}")
         logger.info("Falling back to Position-based summarizer for summary_short")
         position = get_position_summarizer()
         summary_short = position.summarize(content_text, ratio=settings.summarization_short_ratio)

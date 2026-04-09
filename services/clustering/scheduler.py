@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 CLUSTERING_INTERVAL_SECONDS = settings.clustering_scheduler_interval_seconds
 
 # Initial delay before first run (60 seconds after startup — let models warm up)
-INITIAL_DELAY_SECONDS = 60
+INITIAL_DELAY_SECONDS = 600
 
 
 class ClusteringScheduler:
@@ -48,7 +48,12 @@ class ClusteringScheduler:
             logger.info("Clustering scheduler stopped")
 
     async def _loop(self):
-        """Internal loop: wait → run pipeline → repeat."""
+        """
+        Internal loop: wait → run pipeline → repeat.
+        
+        Only runs clustering when AI processor has no active tasks
+        (no summarization, embedding, or TTS in progress).
+        """
         # Initial delay
         logger.info(
             f"Clustering scheduler: waiting {INITIAL_DELAY_SECONDS}s before first run"
@@ -57,7 +62,21 @@ class ClusteringScheduler:
 
         while self._running:
             try:
+                from services.ai_processor_service import ai_processor
+                
+                # Wait until no active AI tasks (summarization, embedding, TTS)
+                if ai_processor.active_tasks > 0:
+                    logger.info(
+                        f"Clustering delayed: AI service has {ai_processor.active_tasks} active tasks. "
+                        f"Will retry in 60s..."
+                    )
+                    await asyncio.sleep(60)
+                    continue
+                
+                # All clear - run clustering
+                logger.info("No active AI tasks detected. Starting clustering pipeline...")
                 await self._run_once()
+                
             except Exception as exc:
                 logger.error(
                     f"Clustering scheduler task error: {exc}", exc_info=True
@@ -66,7 +85,7 @@ class ClusteringScheduler:
             # Sleep until next interval
             if self._running:
                 logger.info(
-                    f"Next clustering run in {CLUSTERING_INTERVAL_SECONDS}s"
+                    f"Next clustering check in {CLUSTERING_INTERVAL_SECONDS}s"
                 )
                 await asyncio.sleep(CLUSTERING_INTERVAL_SECONDS)
 

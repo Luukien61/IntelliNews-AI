@@ -61,6 +61,10 @@ class ClusteringService:
 
         db: Session = SessionLocal()
         try:
+            # 0. Clean up expired clusters FIRST
+            self._cleanup_expired_clusters(db)
+            db.commit()
+            
             # 1. Fetch recent embeddings
             embeddings_by_cat = self._fetch_recent_embeddings(db)
 
@@ -205,30 +209,61 @@ class ClusteringService:
         embeddings_matrix = np.vstack([r["embedding"] for r in records])
 
         # Optional UMAP dimension reduction (768 → n_components)
+        # For UMAP to work with spectral initialization:
+        # - Need at least n_neighbors + 1 samples
+        # - n_components must be < min(n_samples - 1, n_neighbors)
+        # - For very small datasets, use init='random' instead of 'spectral'
+        
+        # Minimum samples = max(n_neighbors + 1, 2 * n_neighbors) for stability
+        min_samples_for_umap = max(
+            self.settings.clustering_umap_n_neighbors + 1,
+            self.settings.clustering_umap_n_neighbors * 2
+        )
+        
         if (
             self.settings.clustering_umap_enabled
-            and len(records) > self.settings.clustering_umap_n_neighbors
+            and len(records) >= min_samples_for_umap
         ):
             import umap
+            # Critical: n_components must be strictly less than n_neighbors to avoid 
+            # scipy eigenvalue solver errors (k >= N) with sparse matrices
+            # Safe formula: n_components <= min(n_neighbors - 1, n_samples // 2, 50)
+            max_safe_components = min(
+                self.settings.clustering_umap_n_neighbors - 1,
+                len(records) // 2,  # Use at most half the samples
+                self.settings.clustering_umap_n_components
+            )
+            
+            n_components = max(2, max_safe_components)  # At least 2D
+            
+            # For small datasets, use random initialization to avoid spectral solver issues
+            # For larger datasets with enough samples, spectral is more stable
+            init_method = 'random' if len(records) < 50 else 'spectral'
+            
             logger.info(
                 f"Category '{category}': reducing {embeddings_matrix.shape[1]}d → "
-                f"{self.settings.clustering_umap_n_components}d with UMAP "
+                f"{n_components}d with UMAP "
                 f"(n_neighbors={self.settings.clustering_umap_n_neighbors}, "
-                f"min_dist={self.settings.clustering_umap_min_dist})"
+                f"min_dist={self.settings.clustering_umap_min_dist}, "
+                f"init={init_method}, "
+                f"{len(records)} samples)"
             )
             reducer = umap.UMAP(
-                n_components=self.settings.clustering_umap_n_components,
+                n_components=n_components,
                 n_neighbors=self.settings.clustering_umap_n_neighbors,
                 min_dist=self.settings.clustering_umap_min_dist,
                 metric=self.settings.clustering_umap_metric,
-                random_state=42
+                init=init_method,
+                random_state=42,
+                n_jobs=1,  # Explicitly set to match random_state (suppresses warning)
+                low_memory=False
             )
             embeddings_matrix = reducer.fit_transform(embeddings_matrix)
         else:
             if self.settings.clustering_umap_enabled:
                 logger.info(
                     f"Category '{category}': skipping UMAP — only {len(records)} samples "
-                    f"(need > {self.settings.clustering_umap_n_neighbors})"
+                    f"(need >= {min_samples_for_umap} for stable UMAP with n_neighbors={self.settings.clustering_umap_n_neighbors})"
                 )
 
         clusterer = hdbscan.HDBSCAN(
@@ -417,12 +452,32 @@ class ClusteringService:
     # Step 5 – Persist to trending_clusters
     # ------------------------------------------------------------------
 
+    def _cleanup_expired_clusters(self, db: Session):
+        """
+        Remove clusters older than clustering_expiry_hours from trending_clusters table.
+        This prevents the database from accumulating stale cluster data.
+        """
+        expiry_cutoff = datetime.now(timezone.utc) - timedelta(
+            hours=self.settings.clustering_expiry_hours
+        )
+        
+        result = db.query(TrendingCluster).filter(
+            TrendingCluster.created_at < expiry_cutoff
+        ).delete(synchronize_session=False)
+        
+        if result > 0:
+            logger.info(
+                f"Cleaned up {result} expired clusters "
+                f"(older than {self.settings.clustering_expiry_hours}h)"
+            )
+
     def _persist_trending_clusters(
         self, db: Session, results: List[Dict[str, Any]]
     ):
-        """Upsert rows into trending_clusters."""
-        # Clear stale data first
-        db.query(TrendingCluster).delete()
+        """
+        Upsert rows into trending_clusters.
+        Expired clusters are already cleaned up at the start of the pipeline.
+        """
 
         from sqlalchemy.dialects.postgresql import insert
         values = []
