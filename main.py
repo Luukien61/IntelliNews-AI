@@ -78,18 +78,11 @@ async def startup_event():
     logger.info(f"Debug mode: {settings.debug}")
     logger.info(f"API prefix: {settings.api_prefix}")
     
-    # Configure PyTorch CPU threads mapping to ai_max_cores
-    try:
-        import torch
-        import os
-        os.environ["OMP_NUM_THREADS"] = str(settings.ai_max_cores)
-        os.environ["MKL_NUM_THREADS"] = str(settings.ai_max_cores)
-        torch.set_num_threads(settings.ai_max_cores)
-        torch.set_num_interop_threads(settings.ai_max_cores)
-        logger.info(f"PyTorch max cores configured to: {settings.ai_max_cores}")
-    except Exception as e:
-        logger.warning(f"Could not configure PyTorch thread count: {e}")
-    
+    # NOTE: CPU thread limits (OMP, MKL, torch threads) and CPU affinity are already
+    # applied at import time by `services.cpu_limiter` (first import in this file).
+    # PyTorch thread count is re-applied in AIProcessorService.__init__() after torch loads.
+    logger.info(f"AI CPU limit: {settings.ai_max_cores} cores (AI_MAX_CORES)")
+
     # Initialize database tables (optional - can use migrations instead)
     try:
         from db.database import init_db
