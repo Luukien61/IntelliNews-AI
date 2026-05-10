@@ -22,15 +22,16 @@ class KafkaConsumerService:
             'enable.auto.commit': True,
         }
         self.consumer: Optional[Consumer] = None
-        self.topic = settings.kafka_topic_news_fetched
+        self.topic_news_fetched = settings.kafka_topic_news_fetched
+        self.topic_tts_completed = getattr(settings, 'kafka_topic_tts_completed', "tts.completed-events")
         self._running = False
 
     async def start(self):
         """Start Kafka consumer loop asynchronously."""
         self.consumer = Consumer(self.conf)
-        self.consumer.subscribe([self.topic])
+        self.consumer.subscribe([self.topic_news_fetched, self.topic_tts_completed])
         self._running = True
-        logger.info(f"Kafka consumer started. Subscribed to topic: {self.topic}")
+        logger.info(f"Kafka consumer started. Subscribed to topics: {self.topic_news_fetched}, {self.topic_tts_completed}")
         logger.info(f"Concurrency: {settings.kafka_event_concurrency}, Task Parallelism: {settings.ai_process_parallel}")
 
         try:
@@ -50,15 +51,23 @@ class KafkaConsumerService:
                 # Process message
                 try:
                     payload = json.loads(msg.value().decode('utf-8'))
+                    topic = msg.topic()
                     news_id = payload.get('newsId')
-                    logger.info(f"Received news event: news_id={news_id}")
                     
-                    if settings.kafka_event_concurrency:
-                        # Process multiple news items at once
-                        asyncio.create_task(ai_processor.process_news_item(payload))
-                    else:
-                        # Process one news item at a time
-                        await ai_processor.process_news_item(payload)
+                    if topic == self.topic_news_fetched:
+                        logger.info(f"Received news event: news_id={news_id}")
+                        if settings.kafka_event_concurrency:
+                            # Process multiple news items at once
+                            asyncio.create_task(ai_processor.process_news_item(payload))
+                        else:
+                            # Process one news item at a time
+                            await ai_processor.process_news_item(payload)
+                    elif topic == self.topic_tts_completed:
+                        logger.info(f"Received TTS completed event: news_id={news_id}")
+                        if settings.kafka_event_concurrency:
+                            asyncio.create_task(ai_processor.process_tts_completed_event(payload))
+                        else:
+                            await ai_processor.process_tts_completed_event(payload)
                     
                 except Exception as e:
                     logger.error(f"Failed to parse or handle message: {e}")

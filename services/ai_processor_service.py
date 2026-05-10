@@ -143,34 +143,52 @@ class AIProcessorService:
         finally:
             db.close()
 
-    def _save_tts_result(self, news_id: int, tts_result: Dict[str, Any]):
-        """Save TTS result URL to NewsAIResult."""
+
+
+    async def process_tts_completed_event(self, event_data: Dict[str, Any]):
+        """Process TTS completed event to update audio_files in DB."""
+        news_id = event_data.get("newsId")
+        if news_id is None:
+            logger.error("Missing newsId in TTS completed event")
+            return
+            
+        news_id_int = int(news_id)
+        audio_files_data = event_data.get("audioFiles", [])
+        
+        # Extract filenames using the configured key
+        audio_key = settings.tts_event_audio_key
+        filenames = [f.get(audio_key) for f in audio_files_data if f.get(audio_key)]
+        
+        if not filenames:
+            logger.warning(f"No valid items found using key '{audio_key}' in TTS event for news_id={news_id_int}")
+            return
+            
+        logger.info(f"Updating TTS result for news_id={news_id_int} with files: {filenames}")
+        
+        await asyncio.to_thread(self._save_tts_completed_filenames, news_id_int, filenames)
+
+    def _save_tts_completed_filenames(self, news_id: int, filenames: list):
+        """Save TTS completed filenames to NewsAIResult."""
         db = SessionLocal()
         try:
+            from sqlalchemy.sql import func
             existing = db.query(NewsAIResult).filter(
                 NewsAIResult.news_id == news_id
             ).first()
             
-            s3_url = tts_result.get("s3_url")
-            if not s3_url:
-                logger.warning(f"No S3 URL in TTS result for news_id={news_id}")
-                return
-
             if existing:
-                audio_files = list(existing.audio_files or [])
-                if s3_url not in audio_files:
-                    audio_files.append(s3_url)
-                    existing.audio_files = audio_files
+                existing.audio_files = filenames
+                existing.updated_at = func.now()
             else:
                 existing = NewsAIResult(
                     news_id=news_id,
-                    audio_files=[s3_url]
+                    audio_files=filenames
                 )
                 db.add(existing)
             
             db.commit()
         except Exception as e:
-            logger.error(f"Failed to save TTS result to DB: {e}")
+            logger.error(f"Failed to save TTS completed result to DB: {e}")
             db.rollback()
         finally:
             db.close()

@@ -1,0 +1,12 @@
+{
+  "newsId": 1295,
+  "audioFiles": [
+    {
+      "voice_id": "Trang",
+      "description": "Giọng nữ miền Bắc",
+      "s3_key": "tts/tts_20260510_144342_26dbc13a.wav",
+      "filename": "tts_20260510_144342_26dbc13a.wav"
+    }
+  ],
+  "timestamp": 1778424223253
+}

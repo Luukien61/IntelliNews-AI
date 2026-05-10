@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     model_config = SettingsConfigDict(
-        env_file=(".env", ".env.production"),
+        env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra='ignore' # Allow extra environment variables
@@ -30,14 +30,16 @@ class Settings(BaseSettings):
     # TTS Configuration
     tts_model_repo: str = "pnnbao-ump/VieNeu-TTS-0.3B-q8-gguf"
     tts_output_dir: str = "outputs/tts"
-    default_tts_voice: str = "Doan"  # Options: Binh, Tuyen, Vinh, Doan, Ly, Ngoc
+    default_tts_voice: str = "Trang"
+    tts_event_audio_key: str = "filename"  # The key to extract from audioFiles in TTS completed event
     
     # S3 Storage Configuration (MinIO hoặc S3-compatible; endpoint 8333 = MinIO trong docker)
     s3_endpoint_url: str = "http://localhost:8333"
-    s3_access_key: str  # MINIO_ROOT_USER
-    s3_secret_key: str  # MINIO_ROOT_PASSWORD
+    s3_access_key: str = ""  # MINIO_ROOT_USER
+    s3_secret_key: str = ""  # MINIO_ROOT_PASSWORD
     s3_bucket_name: str = "audio-files"
     s3_audio_prefix: str = "tts"  # Prefix for TTS files in bucket
+    cloudfront_url: str = "https://d213zhtaqpkk71.cloudfront.net"
     
     # Database Configuration (PostgreSQL for AI results)
     database_url: str = "postgresql://ai_user:ai_password@localhost:5436/intellinews_ai"
@@ -77,6 +79,7 @@ class Settings(BaseSettings):
     kafka_bootstrap_servers: str = "localhost:29092"
     kafka_group_id: str = "ai-service-group"
     kafka_topic_news_fetched: str = "news.fetched-events"
+    kafka_topic_tts_completed: str = "tts.completed-events"
     kafka_auto_offset_reset: str = "latest"
     kafka_event_concurrency: bool = True
     
