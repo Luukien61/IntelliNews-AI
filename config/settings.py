@@ -28,17 +28,10 @@ class Settings(BaseSettings):
     debug: bool = True
     
     # TTS Configuration
-    tts_model_repo: str = "pnnbao-ump/VieNeu-TTS-0.3B-q8-gguf"
-    tts_output_dir: str = "outputs/tts"
     default_tts_voice: str = "Trang"
     tts_event_audio_key: str = "filename"  # The key to extract from audioFiles in TTS completed event
     
     # S3 Storage Configuration (MinIO hoặc S3-compatible; endpoint 8333 = MinIO trong docker)
-    s3_endpoint_url: str = "http://localhost:8333"
-    s3_access_key: str = ""  # MINIO_ROOT_USER
-    s3_secret_key: str = ""  # MINIO_ROOT_PASSWORD
-    s3_bucket_name: str = "audio-files"
-    s3_audio_prefix: str = "tts"  # Prefix for TTS files in bucket
     cloudfront_url: str = "https://d213zhtaqpkk71.cloudfront.net"
     
     # Database Configuration (PostgreSQL for AI results)
@@ -87,26 +80,7 @@ class Settings(BaseSettings):
     ai_process_parallel: bool = True
     ai_process_max_workers: int = 4
     ai_max_cores: int = Field(default_factory=get_default_cores)
-    
-    # Clustering Configuration
-    clustering_min_size: int = 3
-    clustering_min_samples: int = 2
-    clustering_epsilon: float = 0.15
-    clustering_lookback_hours: int = 24
-    clustering_window_hours: int = 24
-    clustering_decay_lambda: float = 0.25
-    clustering_coherence_threshold: float = 0.55  # Min avg cosine sim for valid cluster
-    clustering_scheduler_interval_seconds: int = 7200  # 2 hours; configurable via env
 
-    # UMAP Dimension Reduction (before HDBSCAN)
-    clustering_umap_enabled: bool = True
-    clustering_umap_n_components: int = 50
-    clustering_umap_n_neighbors: int = 5       # Lowered from 30 to work with small categories
-    clustering_umap_min_dist: float = 0.0
-    clustering_umap_metric: str = "cosine"
-    
-    # Cluster Data Expiry (cleanup old clusters from trending_clusters table)
-    clustering_expiry_hours: int = 24  # Remove clusters older than this many hours
     
     @property
     def tts_output_path(self) -> Path:

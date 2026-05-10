@@ -1,8 +1,8 @@
 """SQLAlchemy models for IntelliNews AI Service."""
-from sqlalchemy import Column, BigInteger, Integer, Float, Text, DateTime, String
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import Column, BigInteger, Text, DateTime, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
-from pgvector.sqlalchemy import Vector
 
 from .database import Base
 
@@ -78,44 +78,4 @@ class NewsEmbedding(Base):
         return f"<NewsEmbedding(id={self.id}, news_id={self.news_id}, category={self.category})>"
 
 
-class TrendingCluster(Base):
-    """
-    Model for storing trending clusters information.
-    
-    Attributes:
-        id: Primary key
-        cluster_id: HDBSCAN cluster ID
-        category: News category
-        article_count: Number of articles in cluster
-        trending_score: Calculated score based on recency, velocity, article count
-        summary: Auto-generated summary of the cluster
-        representative_ids: Array of representative news_id
-        period_start: Start timestamp of the cluster window
-        period_end: End timestamp of the cluster window
-        created_at: Record creation time
-    """
-    __tablename__ = "trending_clusters"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    cluster_id = Column(Integer, nullable=False)
-    category = Column(String(50), nullable=False)
-    article_count = Column(Integer, nullable=False, default=0)
-    trending_score = Column(Float, nullable=False, default=0.0)
-    primary_rep_id = Column(BigInteger, nullable=True)  # Bài tiêu biểu để get summary
-    
-    from sqlalchemy.dialects.postgresql import ARRAY
-    representative_ids = Column(ARRAY(BigInteger), nullable=True) # Tất cả news_id trong cụm
-    
-    period_start = Column(DateTime(timezone=True), nullable=True)
-    period_end = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    from sqlalchemy import UniqueConstraint, Index
-    __table_args__ = (
-        UniqueConstraint('cluster_id', 'category', name='trending_clusters_cluster_id_category_key'),
-        Index('idx_trending_clusters_score', 'trending_score'),
-        Index('idx_trending_clusters_category', 'category', 'trending_score'),
-    )
-
-    def __repr__(self):
-        return f"<TrendingCluster(id={self.id}, cluster_id={self.cluster_id}, category={self.category}, score={self.trending_score})>"

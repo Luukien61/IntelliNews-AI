@@ -53,3 +53,5 @@ Thumbs.db
 /docker/.env
 /.env.production
 /docs/
+/scripts/
+/shared-proto/

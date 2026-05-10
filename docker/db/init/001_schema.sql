@@ -56,7 +56,6 @@ CREATE TABLE IF NOT EXISTS news_embeddings
     category       VARCHAR(50) NOT NULL,        -- Cached category for filtering
     title          TEXT        NOT NULL,        -- Cached title for response
     embedding      VECTOR(768) NOT NULL,        -- PhoBERT CLS token embedding (768 dimensions)
-    cluster_id     INT,                         -- Optional cluster ID for grouping similar news items
 
 
     -- Metadata
@@ -81,25 +80,4 @@ CREATE TRIGGER update_news_embeddings_updated_at
     FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
 
----
 
-CREATE TABLE IF NOT EXISTS trending_clusters (
-    id                  BIGSERIAL PRIMARY KEY,
-    cluster_id          INT NOT NULL,
-    category            VARCHAR(50) NOT NULL,
-    article_count       INT NOT NULL DEFAULT 0,
-    trending_score      FLOAT NOT NULL DEFAULT 0,
-    primary_rep_id      BIGINT,                  -- news_id tiêu biểu dùng để lấy summary
-    representative_ids  BIGINT[],                -- danh sách các news_id trong cluster
-    period_start        TIMESTAMPTZ,             -- window thời gian của cluster này
-    period_end          TIMESTAMPTZ,
-    created_at          TIMESTAMPTZ DEFAULT NOW(),
-
-    UNIQUE (cluster_id, category)                -- mỗi cluster chỉ 1 record per category
-);
-
-CREATE INDEX IF NOT EXISTS idx_trending_clusters_score 
-    ON trending_clusters (trending_score DESC);
-
-CREATE INDEX IF NOT EXISTS idx_trending_clusters_category
-    ON trending_clusters (category, trending_score DESC);
