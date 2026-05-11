@@ -1,87 +1,132 @@
 import json
 import logging
 import asyncio
-from typing import Optional
-from confluent_kafka import Consumer, KafkaException, KafkaError
+from typing import Any, Awaitable, Callable, Dict, Optional
+
+from confluent_kafka import Consumer, KafkaError
 
 from config import settings
 from .ai_processor_service import ai_processor
 
 logger = logging.getLogger(__name__)
 
+
 class KafkaConsumerService:
     """
-    Consumes news fetched events from Kafka and initiates AI processing.
+    Consumes Kafka events for AI processing.
+
+    Uses two independent consumer loops (same consumer group, different client.id):
+    - news.fetched-events  → summarization + embedding (can be slow)
+    - tts.completed-events → persist audio paths + completion gate (fast)
+
+    A single consumer polling both topics would interleave messages; TTS work
+    still completes quickly, but splitting avoids any head-of-line coupling and
+    keeps logs/latency easier to reason about.
     """
 
-    def __init__(self):
-        self.conf = {
-            'bootstrap.servers': settings.kafka_bootstrap_servers,
-            'group.id': settings.kafka_group_id,
-            'auto.offset.reset': settings.kafka_auto_offset_reset,
-            'enable.auto.commit': True,
+    def __init__(self) -> None:
+        self._base_conf: Dict[str, Any] = {
+            "bootstrap.servers": settings.kafka_bootstrap_servers,
+            "group.id": settings.kafka_group_id,
+            "auto.offset.reset": settings.kafka_auto_offset_reset,
+            "enable.auto.commit": True,
         }
-        self.consumer: Optional[Consumer] = None
-        self.topic_news_fetched = settings.kafka_topic_news_fetched
-        self.topic_tts_completed = getattr(settings, 'kafka_topic_tts_completed', "tts.completed-events")
+        self._consumer_news: Optional[Consumer] = None
+        self._consumer_tts: Optional[Consumer] = None
         self._running = False
 
-    async def start(self):
-        """Start Kafka consumer loop asynchronously."""
-        self.consumer = Consumer(self.conf)
-        self.consumer.subscribe([self.topic_news_fetched, self.topic_tts_completed])
-        self._running = True
-        logger.info(f"Kafka consumer started. Subscribed to topics: {self.topic_news_fetched}, {self.topic_tts_completed}")
-        logger.info(f"Concurrency: {settings.kafka_event_concurrency}, Task Parallelism: {settings.ai_process_parallel}")
+    async def _consume_loop(
+        self,
+        *,
+        topic: str,
+        client_id: str,
+        dispatch: Callable[[Dict[str, Any]], Awaitable[None]],
+    ) -> None:
+        conf = {**self._base_conf, "client.id": client_id}
+        consumer = Consumer(conf)
+        if topic == settings.kafka_topic_news_fetched:
+            self._consumer_news = consumer
+        else:
+            self._consumer_tts = consumer
+
+        consumer.subscribe([topic])
+        logger.info("Kafka consumer started: topic=%s client.id=%s", topic, client_id)
 
         try:
             while self._running:
-                # Use a small timeout to avoid blocking too long
-                msg = await asyncio.to_thread(self.consumer.poll, 1.0)
+                msg = await asyncio.to_thread(consumer.poll, 1.0)
                 if msg is None:
                     continue
                 if msg.error():
                     if msg.error().code() == KafkaError._PARTITION_EOF:
                         continue
-                    else:
-                        logger.error(f"Kafka Error: {msg.error()}")
-                        await asyncio.sleep(1)
-                        continue
-                
-                # Process message
-                try:
-                    payload = json.loads(msg.value().decode('utf-8'))
-                    topic = msg.topic()
-                    news_id = payload.get('newsId')
-                    
-                    if topic == self.topic_news_fetched:
-                        logger.info(f"Received news event: news_id={news_id}")
-                        if settings.kafka_event_concurrency:
-                            # Process multiple news items at once
-                            asyncio.create_task(ai_processor.process_news_item(payload))
-                        else:
-                            # Process one news item at a time
-                            await ai_processor.process_news_item(payload)
-                    elif topic == self.topic_tts_completed:
-                        logger.info(f"Received TTS completed event: news_id={news_id}")
-                        if settings.kafka_event_concurrency:
-                            asyncio.create_task(ai_processor.process_tts_completed_event(payload))
-                        else:
-                            await ai_processor.process_tts_completed_event(payload)
-                    
-                except Exception as e:
-                    logger.error(f"Failed to parse or handle message: {e}")
+                    logger.error("Kafka error on %s: %s", topic, msg.error())
+                    await asyncio.sleep(1)
+                    continue
 
+                try:
+                    payload = json.loads(msg.value().decode("utf-8"))
+                    news_id = payload.get("newsId")
+                    logger.info("Received %s: news_id=%s", topic, news_id)
+
+                    if settings.kafka_event_concurrency:
+                        asyncio.create_task(dispatch(payload))
+                    else:
+                        await dispatch(payload)
+                except Exception as e:
+                    logger.error("Failed to handle message from %s: %s", topic, e, exc_info=True)
+        finally:
+            # Stop sibling loop if this one exits (crash or shutdown).
+            self._running = False
+            consumer.close()
+            logger.info("Kafka consumer stopped: topic=%s", topic)
+
+    async def _dispatch_news(self, payload: Dict[str, Any]) -> None:
+        await ai_processor.process_news_item(payload)
+
+    async def _dispatch_tts(self, payload: Dict[str, Any]) -> None:
+        await ai_processor.process_tts_completed_event(payload)
+
+    async def start(self) -> None:
+        self._running = True
+        logger.info(
+            "Kafka consumers starting (group.id=%s): %s | %s — concurrency=%s parallel=%s",
+            settings.kafka_group_id,
+            settings.kafka_topic_news_fetched,
+            settings.kafka_topic_tts_completed,
+            settings.kafka_event_concurrency,
+            settings.ai_process_parallel,
+        )
+        try:
+            results = await asyncio.gather(
+                self._consume_loop(
+                    topic=settings.kafka_topic_news_fetched,
+                    client_id="intellinews-ai-news",
+                    dispatch=self._dispatch_news,
+                ),
+                self._consume_loop(
+                    topic=settings.kafka_topic_tts_completed,
+                    client_id="intellinews-ai-tts",
+                    dispatch=self._dispatch_tts,
+                ),
+                return_exceptions=True,
+            )
+            for r in results:
+                if isinstance(r, BaseException):
+                    logger.error(
+                        "Kafka consumer task ended with error: %s",
+                        r,
+                        exc_info=(type(r), r, r.__traceback__),
+                    )
         except Exception as e:
-            logger.error(f"Fatal error in consumer: {e}")
+            logger.error("Fatal error in Kafka consumers: %s", e, exc_info=True)
         finally:
             self._running = False
-            if self.consumer:
-                self.consumer.close()
-            logger.info("Kafka consumer stopped.")
+            self._consumer_news = None
+            self._consumer_tts = None
+            logger.info("Kafka consumer service exited.")
 
-    def stop(self):
-        """Stop the consumer loop."""
+    def stop(self) -> None:
         self._running = False
 
 

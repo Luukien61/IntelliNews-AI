@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     kafka_group_id: str = "ai-service-group"
     kafka_topic_news_fetched: str = "news.fetched-events"
     kafka_topic_tts_completed: str = "tts.completed-events"
+    kafka_topic_ai_processed: str = "news.ai-processed-events"  # Emitted when ALL AI tasks are done
     kafka_auto_offset_reset: str = "latest"
     kafka_event_concurrency: bool = True
     

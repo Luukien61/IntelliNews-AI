@@ -342,15 +342,24 @@ class ContentRecommendationService:
     # Similarity search strategies
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _resolve_candidate_category(source: NewsEmbedding, category_filter: Optional[str]) -> str:
+        """Use explicit API filter when set; otherwise same category as the source row."""
+        if category_filter and str(category_filter).strip():
+            return str(category_filter).strip()
+        return source.category
+
     async def get_similar_articles(
             self,
             news_id: int,
             limit: int = 10,
-            strategy: str = "pgvector"
+            strategy: str = "pgvector",
+            category_filter: Optional[str] = None,
     ) -> Tuple[List[RecommendedNewsItem], bool]:
         """
         Find similar articles based on cosine similarity of embeddings.
-        Automatically filters candidates by the source article's category.
+        Candidates are restricted to one category: ``category_filter`` when provided,
+        otherwise the source article's category.
         
         Args:
             news_id: Source article ID
@@ -359,20 +368,13 @@ class ContentRecommendationService:
                        "pgvector" — SQL-level cosine distance (recommended)
                        "dot"      — numpy dot product (fast, requires normalized embeddings)
                        "sklearn"  — sklearn cosine_similarity (fallback)
+            category_filter: Optional category name (e.g. enum string) to search within
             
         Returns:
             Tuple of (list of RecommendedNewsItem, is_cached)
         """
-        # Check Redis cache first
-        cache_key = f"rec:{news_id}:{limit}:cat"
-        cached_result = await self._get_from_cache(cache_key)
-        if cached_result is not None:
-            logger.info(f"Cache hit for {cache_key}")
-            return cached_result, True
-
         db: Session = SessionLocal()
         try:
-            # Get source article embedding
             source = db.query(NewsEmbedding).filter(
                 NewsEmbedding.news_id == news_id
             ).first()
@@ -381,20 +383,26 @@ class ContentRecommendationService:
                 logger.warning(f"No embedding found for news_id={news_id}")
                 return [], False
 
-            # Dispatch to the chosen strategy
-            if strategy == "pgvector":
-                recommendations = self._similar_pgvector(db, source, limit)
-            elif strategy == "dot":
-                recommendations = self._similar_dot_product(db, source, limit)
-            else:
-                recommendations = self._similar_sklearn(db, source, limit)
+            filter_cat = self._resolve_candidate_category(source, category_filter)
+            cache_key = f"rec:{news_id}:{limit}:cat:{filter_cat}"
 
-            # Cache the result in Redis
+            cached_result = await self._get_from_cache(cache_key)
+            if cached_result is not None:
+                logger.info(f"Cache hit for {cache_key}")
+                return cached_result, True
+
+            if strategy == "pgvector":
+                recommendations = self._similar_pgvector(db, source, limit, filter_cat)
+            elif strategy == "dot":
+                recommendations = self._similar_dot_product(db, source, limit, filter_cat)
+            else:
+                recommendations = self._similar_sklearn(db, source, limit, filter_cat)
+
             await self._set_to_cache(cache_key, recommendations)
 
             logger.info(
                 f"Generated {len(recommendations)} recommendations for news_id={news_id} "
-                f"(strategy={strategy})"
+                f"(strategy={strategy}, category={filter_cat})"
             )
             return recommendations, False
 
@@ -405,7 +413,7 @@ class ContentRecommendationService:
             db.close()
 
     def _similar_pgvector(
-            self, db: Session, source: NewsEmbedding, limit: int
+            self, db: Session, source: NewsEmbedding, limit: int, candidate_category: str
     ) -> List[RecommendedNewsItem]:
         """
         Strategy A — pgvector cosine distance (SQL-level, most scalable).
@@ -418,7 +426,7 @@ class ContentRecommendationService:
             db.query(NewsEmbedding)
             .filter(
                 NewsEmbedding.news_id != source.news_id,
-                NewsEmbedding.category == source.category
+                NewsEmbedding.category == candidate_category
             )
             .order_by(
                 NewsEmbedding.embedding.cosine_distance(source.embedding)
@@ -450,7 +458,7 @@ class ContentRecommendationService:
         return recommendations[:limit]
 
     def _similar_dot_product(
-            self, db: Session, source: NewsEmbedding, limit: int
+            self, db: Session, source: NewsEmbedding, limit: int, candidate_category: str
     ) -> List[RecommendedNewsItem]:
         """
         Strategy B — numpy dot product (fast, requires normalized embeddings).
@@ -460,7 +468,7 @@ class ContentRecommendationService:
             db.query(NewsEmbedding)
             .filter(
                 NewsEmbedding.news_id != source.news_id,
-                NewsEmbedding.category == source.category
+                NewsEmbedding.category == candidate_category
             )
             .all()
         )
@@ -499,7 +507,7 @@ class ContentRecommendationService:
         return recommendations
 
     def _similar_sklearn(
-            self, db: Session, source: NewsEmbedding, limit: int
+            self, db: Session, source: NewsEmbedding, limit: int, candidate_category: str
     ) -> List[RecommendedNewsItem]:
         """
         Strategy C — sklearn cosine_similarity (original approach, fallback).
@@ -508,7 +516,7 @@ class ContentRecommendationService:
             db.query(NewsEmbedding)
             .filter(
                 NewsEmbedding.news_id != source.news_id,
-                NewsEmbedding.category == source.category
+                NewsEmbedding.category == candidate_category
             )
             .all()
         )
