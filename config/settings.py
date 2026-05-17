@@ -57,10 +57,15 @@ class Settings(BaseSettings):
     # Summarization Configuration
     phobert_model_name: str = "vinai/phobert-base"
     vit5_model_name: str = "VietAI/vit5-base-vietnews-summarization"
-    # ViT5 min output length (90 or 128 characters)
-    vit5_min_length: int = 90  # Minimum length for ViT5 generated summaries
+    # ViT5 decode (token lengths for model.generate — not character counts)
+    vit5_min_length: int = 25
+    vit5_max_length: int = 128
+    vit5_num_beams: int = 4
+    vit5_length_penalty: float = 1.0
+    vit5_max_input_chars: int = 6000
+    vit5_max_filler_hits: int = 1
     # Ratio of sentences to keep per summary type:
-    # summary_short  → ViT5 abstractive (min 128/90 chars, configurable)
+    # summary_short  → ViT5 abstractive (see vit5_* decode settings above)
     # summary_default → PhoBERT extractive (0.3 ≈ 3 sentences)
     summarization_short_ratio: float = 0.2
     summarization_default_ratio: float = 0.3
